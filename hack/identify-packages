@@ -1,0 +1,72 @@
+#!/bin/bash
+# Identify npm onboarding packages added or changed since prev-packages-ref.
+set -euo pipefail
+
+PACKAGES_DIR="packages"
+REVISION="${1:?prev-packages-ref required}"
+RESULT_FILE="${2:?result file required}"
+EMPTY_RESULT_FILE="${3:?empty result file required}"
+
+echo "[identify-packages] REVISION=${REVISION}" >&2
+
+git remote -v >&2 || true
+
+extract_field() {
+    local field="$1"
+    grep -o "\"${field}\": *\"[^\"]*\"" | head -1 | sed "s/.*\"${field}\": *\"\([^\"]*\)\".*/\1/" || true
+}
+
+manifest_dir_from_path() {
+    local path="$1"
+    dirname "${path}"
+}
+
+set +e
+CHANGED_MANIFESTS="$(git diff --name-only --diff-filter=AM "${REVISION}" -- "${PACKAGES_DIR}/" | grep '/manifest\.json$' || true)"
+err="$?"
+set -e
+
+if [[ $err -ne 0 ]]; then
+    echo "[identify-packages] git diff failed, assuming all manifests are new" >&2
+    CHANGED_MANIFESTS="$(find "${PACKAGES_DIR}" -name manifest.json -type f 2>/dev/null || true)"
+fi
+
+NEW_PACKAGES=""
+for manifest in ${CHANGED_MANIFESTS}; do
+    [[ -f "${manifest}" ]] || continue
+    pkg_dir="$(manifest_dir_from_path "${manifest}")"
+    name="$(extract_field name < "${manifest}")"
+    version="$(extract_field version < "${manifest}")"
+    if [[ -z "${name}" || -z "${version}" ]]; then
+        echo "[identify-packages] skipping invalid manifest ${manifest}" >&2
+        continue
+    fi
+
+    old_manifest="$(git show "${REVISION}:${manifest}" 2>/dev/null || true)"
+    if [[ -n "${old_manifest}" ]]; then
+        old_name="$(extract_field name <<< "${old_manifest}")"
+        old_version="$(extract_field version <<< "${old_manifest}")"
+        if [[ "${name}" == "${old_name}" && "${version}" == "${old_version}" ]]; then
+            continue
+        fi
+    fi
+
+    NEW_PACKAGES="${NEW_PACKAGES}${pkg_dir}"$'\n'
+done
+NEW_PACKAGES="$(echo -n "${NEW_PACKAGES}" | sed '/^$/d' | sort -u)"
+
+echo "Packages to build:"
+echo "${NEW_PACKAGES}"
+
+NEW_PACKAGES_JSON='[]'
+if [[ -n "${NEW_PACKAGES}" ]]; then
+    NEW_PACKAGES_JSON="$(printf '%s\n' "${NEW_PACKAGES}" | sed -e ':a;N;$!ba;s/\n/", "/g' | sed -e 's/^/\["/' -e 's/$/"\]/')"
+fi
+
+echo "${NEW_PACKAGES_JSON}" | tee "${RESULT_FILE}"
+
+if [[ "${NEW_PACKAGES_JSON}" == "[]" ]]; then
+    printf 'no-packages' | tee "${EMPTY_RESULT_FILE}"
+else
+    printf 'has-packages' | tee "${EMPTY_RESULT_FILE}"
+fi

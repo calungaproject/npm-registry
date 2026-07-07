@@ -1,0 +1,267 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: build-npm
+spec:
+  description: |
+    npm Trusted Libraries onboarding — PR build pipeline.
+    Lints changed manifests, identifies packages, runs the factory, pushes
+    built tarballs as an OCI artifact to Quay (mirrors Python index).
+  params:
+    - name: git-url
+      type: string
+    - name: revision
+      type: string
+      default: ""
+    - name: output-image
+      description: Quay repository prefix; npm packages land at $(output-image).npm
+      type: string
+    - name: image-expires-after
+      type: string
+      default: ""
+    - name: prev-packages-ref
+      type: string
+    - name: git-clone-depth
+      type: string
+      default: "0"
+    - name: builder-image
+      type: string
+    - name: builder-image-digest
+      description: Digest pin enforced by lint-manifest (sha256:...)
+      type: string
+    - name: task-build-npm-package-bundle
+      description: Tekton bundle image for build-npm-package-oci-ta
+      type: string
+    - name: publish-to-pulp
+      description: When true, also npm publish to Pulp Stage (future; requires stage secret)
+      type: string
+      default: "false"
+    - name: pulp-npm-registry-url
+      description: Pulp Stage npm registry URL (only when publish-to-pulp is true)
+      type: string
+      default: ""
+    - name: npm-publish-secret-name
+      type: string
+      default: rhtl-pulp-npm-stage-credentials
+    - name: skip-checks
+      type: string
+      default: "false"
+    - name: rebuild
+      type: string
+      default: "false"
+  results:
+    - name: IMAGE_URL
+      value: $(tasks.export-image-results.results.IMAGE_URL)
+    - name: IMAGE_DIGEST
+      value: $(tasks.export-image-results.results.IMAGE_DIGEST)
+    - name: CHAINS-GIT_URL
+      value: $(tasks.clone-repository.results.url)
+    - name: CHAINS-GIT_COMMIT
+      value: $(tasks.clone-repository.results.commit)
+  tasks:
+    - name: init
+      params:
+        - name: image-url
+          value: $(params.output-image)
+        - name: rebuild
+          value: $(params.rebuild)
+        - name: skip-checks
+          value: $(params.skip-checks)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: init
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-init:0.4@sha256:288f3106118edc1d0f0c79a89c960abf5841a4dd8bc3f38feb10527253105b19
+          - name: kind
+            value: task
+    - name: clone-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.revision)
+        - name: fetchTags
+          value: "true"
+        - name: depth
+          value: $(params.git-clone-depth)
+        - name: ociStorage
+          value: $(params.output-image).git
+        - name: ociArtifactExpiresAfter
+          value: $(params.image-expires-after)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: git-clone-oci-ta
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.1@sha256:2c388d28651457db60bb90287e7d8c3680303197196e4476878d98d81e8b6dc9
+          - name: kind
+            value: task
+      workspaces:
+        - name: basic-auth
+          workspace: git-auth
+    - name: lint-manifests
+      params:
+        - name: SOURCE_ARTIFACT
+          value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+        - name: SCRIPT
+          value: |
+            export BUILDER_IMAGE_DIGEST='$(params.builder-image-digest)'
+            ./hack/lint-manifest.sh '$(params.prev-packages-ref)'
+        - name: SCRIPT_RUNNER_IMAGE
+          value: $(params.builder-image)
+        - name: HERMETIC
+          value: "true"
+        - name: ociStorage
+          value: $(params.output-image).lint
+        - name: ociArtifactExpiresAfter
+          value: $(params.image-expires-after)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: run-script-oci-ta
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1@sha256:834a934f1e631a79aea7f2d001162cf90086e664e648c8ca15b69ad9798571ee
+          - name: kind
+            value: task
+    - name: identify-packages
+      params:
+        - name: SOURCE_ARTIFACT
+          value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+        - name: SCRIPT
+          value: |
+            ./hack/identify-packages '$(params.prev-packages-ref)' "${SCRIPT_OUTPUT_ARRAY}" "${SCRIPT_OUTPUT}"
+        - name: SCRIPT_RUNNER_IMAGE
+          value: $(params.builder-image)
+        - name: HERMETIC
+          value: "true"
+        - name: ociStorage
+          value: $(params.output-image).pkgs
+        - name: ociArtifactExpiresAfter
+          value: $(params.image-expires-after)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: run-script-oci-ta
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1@sha256:834a934f1e631a79aea7f2d001162cf90086e664e648c8ca15b69ad9798571ee
+          - name: kind
+            value: task
+    - name: build-npm-package
+      params:
+        - name: PACKAGES
+          value: $(tasks.identify-packages.results.SCRIPT_OUTPUT_ARRAY)
+        - name: SOURCE_ARTIFACT
+          value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+        - name: BUILDER_IMAGE
+          value: $(params.builder-image)
+        - name: IMAGE
+          value: $(params.output-image).npm
+        - name: IMAGE_EXPIRES_AFTER
+          value: $(params.image-expires-after)
+        - name: PULP_NPM_REGISTRY_URL
+          value: $(params.pulp-npm-registry-url)
+        - name: NPM_PUBLISH_SECRET_NAME
+          value: $(params.npm-publish-secret-name)
+        - name: PUBLISH_TO_PULP
+          value: $(params.publish-to-pulp)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: build-npm-package-oci-ta
+          - name: bundle
+            value: $(params.task-build-npm-package-bundle)
+          - name: kind
+            value: task
+      when:
+        - input: "$(tasks.identify-packages.results.SCRIPT_OUTPUT)"
+          operator: in
+          values: ["has-packages"]
+    - name: export-image-results
+      runAfter:
+        - identify-packages
+        - build-npm-package
+      params:
+        - name: output-image
+          value: $(params.output-image)
+        - name: package-status
+          value: $(tasks.identify-packages.results.SCRIPT_OUTPUT)
+        - name: image-expires-after
+          value: $(params.image-expires-after)
+      taskSpec:
+        params:
+          - name: output-image
+            type: string
+          - name: package-status
+            type: string
+          - name: image-expires-after
+            type: string
+            default: ""
+        results:
+          - name: IMAGE_URL
+            type: string
+          - name: IMAGE_DIGEST
+            type: string
+        volumes:
+          - name: trusted-ca
+            configMap:
+              name: trusted-ca
+              items:
+                - key: ca-bundle.crt
+                  path: ca-bundle.crt
+              optional: true
+        steps:
+          - name: export
+            image: quay.io/konflux-ci/oras:latest@sha256:1beeecce012c99794568f74265c065839f9703d28306a8430b667f639343a98b
+            volumeMounts:
+              - name: trusted-ca
+                mountPath: /etc/pki/tls/certs/ca-custom-bundle.crt
+                subPath: ca-bundle.crt
+                readOnly: true
+            env:
+              - name: OUTPUT_IMAGE
+                value: $(params.output-image)
+              - name: PACKAGE_STATUS
+                value: $(params.package-status)
+              - name: IMAGE_EXPIRES_AFTER
+                value: $(params.image-expires-after)
+            script: |
+              #!/bin/bash
+              set -euo pipefail
+
+              IMAGE="${OUTPUT_IMAGE}.npm"
+
+              select-oci-auth "$IMAGE" > auth.json
+              AUTHFILE="$(realpath auth.json)"
+
+              EXPIRE_LABEL=()
+              [ -n "$IMAGE_EXPIRES_AFTER" ] && EXPIRE_LABEL=("--annotation" "quay.expires-after=$IMAGE_EXPIRES_AFTER")
+
+              if [ "${PACKAGE_STATUS}" = "no-packages" ]; then
+                echo "[export-image-results] pushing empty npm OCI artifact (infra-only PR)"
+                workdir="$(mktemp -d)"
+                touch "${workdir}/.keep"
+                cd "${workdir}"
+                retry oras push "$IMAGE" \
+                  --registry-config "${AUTHFILE}" \
+                  "${EXPIRE_LABEL[@]}" \
+                  --artifact-type "application/vnd.npm.packages" \
+                  .keep
+              elif [ "${PACKAGE_STATUS}" = "has-packages" ]; then
+                echo "[export-image-results] resolving npm OCI artifact from build-npm-package"
+              else
+                echo "unexpected package-status: ${PACKAGE_STATUS}" >&2
+                exit 1
+              fi
+
+              DIGEST="$(retry oras resolve --registry-config "${AUTHFILE}" "$IMAGE")"
+              echo -n "$IMAGE" | tee "$(results.IMAGE_URL.path)"
+              echo -n "$DIGEST" | tee "$(results.IMAGE_DIGEST.path)"
+  workspaces:
+    - name: git-auth
+      optional: true

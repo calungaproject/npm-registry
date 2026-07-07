@@ -1,0 +1,54 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.openshift.io/repo: https://github.com/calungaproject/npm-registry?rev={{revision}}
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch == "main"
+  creationTimestamp: null
+  labels:
+    appstudio.openshift.io/application: calunga-npm-registry-main
+    appstudio.openshift.io/component: calunga-npm-registry-main
+    pipelines.appstudio.openshift.io/type: build
+  name: calunga-npm-registry-main-on-pull-request
+  namespace: calunga-tenant
+spec:
+  params:
+    - name: git-url
+      value: '{{source_url}}'
+    - name: revision
+      value: '{{revision}}'
+    - name: output-image
+      value: quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-registry-main:on-pr-{{revision}}
+    - name: image-expires-after
+      value: 5d
+    - name: prev-packages-ref
+      value: 'origin/{{target_branch}}'
+    - name: git-clone-depth
+      value: "0"
+    - name: builder-image
+      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder@sha256:282a383d313a8c7e3c5a41e81e666144263f98ac1bfed1f57fd149d83295b1e8
+    - name: builder-image-digest
+      value: sha256:282a383d313a8c7e3c5a41e81e666144263f98ac1bfed1f57fd149d83295b1e8
+    - name: task-build-npm-package-bundle
+      value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package@sha256:7c01d9731b24bea64ed4bcd608045131578619fc1dbdca44c66beb6fb2d7b50b
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-calunga-npm-registry-main
+  workspaces:
+    - name: git-auth
+      secret:
+        secretName: '{{ git_auth_secret }}'
+  pipelineRef:
+    name: build-npm
+  taskRunSpecs:
+    - pipelineTaskName: build-npm-package
+      computeResources:
+        requests:
+          memory: 8Gi
+        limits:
+          memory: 12Gi
+status: {}
