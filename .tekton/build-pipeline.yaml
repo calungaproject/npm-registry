@@ -152,13 +152,16 @@ spec:
           - name: kind
             value: task
     - name: build-npm-package
+      runAfter:
+        - lint-manifests
+        - identify-packages
       params:
         - name: PACKAGES
           value: $(tasks.identify-packages.results.SCRIPT_OUTPUT_ARRAY)
         - name: SOURCE_ARTIFACT
           value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
         - name: BUILDER_IMAGE
-          value: $(params.builder-image)
+          value: $(tasks.lint-manifests.results.SCRIPT_RUNNER_IMAGE_REFERENCE)
         - name: IMAGE
           value: $(params.output-image).npm
         - name: IMAGE_EXPIRES_AFTER
