@@ -27,6 +27,26 @@ Plumbing (`npm-builder`, `task-build-npm-package`) stays UI-managed under `calun
    `task-build-npm-package-bundle` in this PipelineRun.
 4. **Builder image** — keep `builder-image` / `builder-image-digest` in sync with Quay `npm-builder`.
 
+## Viewing OCI artifacts
+
+PR builds push tarballs to a **private** Quay repo (`calunga-npm-registry-main`).
+Do **not** expect to browse it at `quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-registry-main`
+unless a Quay admin has granted your user Read on that repo.
+
+This repo is GitOps-managed (`ImageRepository` in `konflux-release-data`), unlike plumbing
+components such as `task-build-npm-package` (UI-created under `calunga-v2`), where the creator
+is often on the Quay repo ACL automatically.
+
+**Inspect builds in Konflux UI:**
+
+1. Application / Component **`calunga-npm-registry-main`**
+2. Open the PipelineRun → **Results** → `IMAGE_URL`, `IMAGE_DIGEST`
+3. For local pull: Component page → **Registry login information** → use the Konflux image
+   proxy login (not a direct `quay.io` URL). See
+   [Accessing private image repositories](https://konflux-ci.dev/docs/building/accessing-private-images/).
+
+CI already runs each recipe's `verify.smoke.sh` before push; manual pull is optional audit.
+
 ## Pulp Stage (deferred)
 
 The build task still supports optional `publish-to-pulp` when a stage npm repo exists.
