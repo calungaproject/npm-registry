@@ -220,7 +220,7 @@ spec:
               optional: true
         steps:
           - name: export
-            image: quay.io/konflux-ci/oras:latest@sha256:1beeecce012c99794568f74265c065839f9703d28306a8430b667f639343a98b
+            image: quay.io/konflux-ci/oras:latest@sha256:18fa6c06c8a80ba272354f969e7a80c09d834c4889acc7079353080d7e979d33
             volumeMounts:
               - name: trusted-ca
                 mountPath: /etc/pki/tls/certs/ca-custom-bundle.crt
