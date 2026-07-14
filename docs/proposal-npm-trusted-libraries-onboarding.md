@@ -84,13 +84,21 @@ calunga-npm-onboarding/
         manifest.json
         build.entrypoint.sh
         verify.smoke.sh
+    better-sqlite3/
+      11.1.0/
+        manifest.json
+        build.entrypoint.sh
+        verify.smoke.sh
+        tl-install.js              # optional — Tier B/C install shim (see below)
 ```
 
 **Alternative:** `packages/<name>/manifest.json` + scripts with version inside manifest only — team to pick one layout and enforce in CI.
 
+Each onboarded **name@version** includes **at minimum** `manifest.json`, `build.entrypoint.sh`, and `verify.smoke.sh`. Tier **B/C** recipes may add **optional helper files** in the same directory (e.g. `tl-install.js`) that the entrypoint copies into the published main tarball — keep them small and PR-reviewable; do not hide install-time logic only inside bash heredocs.
+
 ### 2. `plumbing`
 
-- **Builder images** — e.g. `quay.io/.../calunga-npm-builder-node20-glibc` with pinned Node, Go, Rust, python3 for node-gyp, libvips headers where needed.
+- **Builder images** — e.g. `quay.io/.../npm-builder` (UBI, Node 20 LTS, Go, Rust, gcc, python3 for node-gyp). Compiler/stdlib baseline must match onboarded native addons (e.g. C++20 may require **gcc-toolset** on UBI 8 or a newer base image — see [Support matrix](#support-matrix-v1)).
 - **Tekton tasks / pipelines** — generic `build-npm-onboarded-package` that:
   - Clones onboarding repo at merged commit
   - Runs `build.entrypoint.sh` in chosen builder image
@@ -106,19 +114,19 @@ calunga-npm-onboarding/
 
 ## Onboard unit: manifest + scripts
 
-Each onboarded **name@version** includes exactly three deliverables in the onboarding repo.
+Each onboarded **name@version** includes the three required scripts below (plus optional helpers for Tier B/C).
 
 ### One manifest, one build, multiple outputs
 
 A single onboard directory (e.g. `packages/esbuild/0.28.0/`) defines **one** factory run:
 
-- **One** `manifest.json`, **one** `build.entrypoint.sh`, **one** `verify.smoke.sh`.
+- **One** `manifest.json`, **one** `build.entrypoint.sh`, **one** `verify.smoke.sh` (Tier B/C may add optional helpers such as `tl-install.js`).
 - **One** checkout of `source.ref`.
 - **One or more** `outputs[]` entries — e.g. main `npm-package` and `tl-platform-package` for Tier B.
 
-Tier B packages such as **esbuild** are **not** split across two onboarding PRs. The entrypoint must produce **both** tarballs listed in `outputs` (JS wrapper + `@calunga/<name>-linux-x64`) before publish. Smoke tests should cover both where applicable.
+Tier B and Tier C packages such as **esbuild** and **better-sqlite3** are **not** split across two onboarding PRs. The entrypoint must produce **both** tarballs listed in `outputs` (main package + `@calunga/<name>-linux-x64`) before publish. Smoke tests should cover both where applicable.
 
-Tier A has a single `outputs` entry (main package only). Tier C may add extra outputs (e.g. bundled libs) in the same manifest when needed.
+Tier A has a single `outputs` entry (main package only). Tier **B** and Tier **C** normally publish **main + `@calunga/<name>-linux-x64`** (see `outputs[]`); Tier C differs in that the platform binary is **compiled in the factory** (e.g. node-gyp), not downloaded as an upstream prebuild.
 
 ### `manifest.json`
 
@@ -138,10 +146,6 @@ Machine-readable metadata for CI and review.
   "upstream_npm": {
     "version": "0.28.0",
     "integrity": "sha512-..."
-  },
-  "builder": {
-    "image": "quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-builder-node20-glibc",
-    "image_digest_pin": "sha256:..."
   },
   "entrypoint": "build.entrypoint.sh",
   "smoke": "verify.smoke.sh",
@@ -181,10 +185,9 @@ Fields are illustrative; JSON Schema to be added in the onboarding repo.
 | `native_tier`                     | `A` pure JS, `B` platform optional family, `C` compile-heavy |
 | `source`                          | **Authoritative build input** — git URL + tag or commit        |
 | `upstream_npm`                    | Expected npm release version + optional integrity; **verification only** (ref↔version), not fetched for build |
-| `builder`                         | Image reference; digest pin enforced in CI                   |
 | `entrypoint` / `smoke`            | Filenames in same directory                                  |
 | `outputs`                         | All tarballs this manifest produces in one build (main + platform) |
-| `optional_dependencies_published` | Platform packages wired from main package (Tier B)           |
+| `optional_dependencies_published` | Platform packages wired from main package (Tier B/C)           |
 | `requires_tl_packages`            | **Author input** — prod deps (and platform packages for Tier B deps) used to **compute** L1/L2/L3; AI may draft, human confirms |
 
 
@@ -197,17 +200,31 @@ Fields are illustrative; JSON Schema to be added in the onboarding repo.
 - Must not call `npm publish` to npmjs, hold cosign keys, or exfiltrate secrets.
 - Network: document required egress (git, language toolchains); default factory policy is allowlist-only.
 
+Factory image version is pinned in the onboarding repo **PipelineRun** (`builder-image@sha256:...`), not in per-package manifests. Provenance records the digest used at build time.
+
+**Tier B/C — assembling the published main tarball**
+
+The entrypoint is responsible for **both** platform and main outputs, including **TL-specific wiring of the main `.tgz`** (not only compiling or copying upstream files):
+
+1. Build or obtain the linux-x64 native artifact and pack `@calunga/<name>-linux-x64` (platform `outputs[]` entry).
+2. Stage the **published** main package: JS/API files, updated `optionalDependencies`, stripped consumer compile paths (`prebuild-install`, `node-gyp`, `|| npm run build`, etc.).
+3. Include a **TL install shim** (`install.js` or equivalent) that resolves the platform package from **Pulp only** — see [Published `package.json` and scripts policy](#published-packagejson-and-scripts-policy).
+4. Pack the main tarball to the path in `outputs[]`.
+
+Onboarders may **patch upstream** `install.js` (esbuild-style) or ship a **separate recipe file** (e.g. `tl-install.js`) that the entrypoint copies into the tarball as `install.js` — preferred when upstream has no small shim to adapt. Either way, the install helper diff must be visible in the PR.
+
 Example responsibilities (package-specific):
 
 - Tier A: build/pack from git tree (`npm pack` **from local checkout**, `npm run build`, etc.).
-- Tier B: same run builds JS wrapper tarball **and** linux-x64 binary tarball (e.g. `go build` + layout for `@calunga/...-linux-x64`).
-- Tier C: compile native artifacts from git source into platform package layout + main package in one entrypoint.
+- Tier B: same run builds JS wrapper tarball **and** linux-x64 binary tarball (e.g. `go build` + layout for `@calunga/...-linux-x64`); patch or replace upstream install helper.
+- Tier C: **compile** native artifacts from git (e.g. `node-gyp`) into the platform package; assemble main tarball **without** consumer compile fallbacks; same install-shim pattern as Tier B.
 
 ### `verify.smoke.sh`
 
-- **Required.** Runs after build in same image (or slim verifier image with same glibc/Node).
+- **Required.** Runs after build in the same builder image (or slim verifier with same glibc/Node).
 - Exits non-zero on failure — blocks publish.
-- Minimal checks: binary runs `--version`, `node -e "require('...')"` , or CLI smoke for Tier B/C.
+- Minimal checks: tarball layout, published `package.json` policy (Tier B/C), native artifact sanity (ELF / `--version` / `node --check` as appropriate).
+- Use tools available in the **npm-builder** image (`od`, `tar`, `node`, `jq`) — do not assume optional packages such as `file(1)`.
 
 ---
 
@@ -405,12 +422,13 @@ The **platform package** uses a **new** minimal `package.json` (binary layout on
 
 **Upstream patterns → TL intent**
 
-- **esbuild:** `postinstall` → `node install.js` selecting `@esbuild/linux-x64` from npmjs → same pattern, shim resolves `@calunga/esbuild-linux-x64` from **Pulp only**.
-- **sharp:** `install` → `node install/check.js || npm run build` → TL shim loads prebuilt from platform package; **remove** consumer compile-at-install path from published artifact.
+- **esbuild (Tier B):** `postinstall` → `node install.js` selecting `@esbuild/linux-x64` from npmjs → entrypoint patches upstream `install.js` so the shim resolves `@calunga/esbuild-linux-x64` from **Pulp only**.
+- **better-sqlite3 (Tier C):** `install` → `prebuild-install || node-gyp rebuild` → entrypoint compiles in factory, ships `tl-install.js` as `install.js`, removes consumer compile path from published `package.json`.
+- **sharp (Tier B/C):** `install` → `node install/check.js || npm run build` → TL shim loads prebuilt from platform package; **remove** consumer compile-at-install path from published artifact.
 
 #### Preferred strategies (least → most invasive)
 
-1. **Replace helper file** — keep `"postinstall": "node install.js"` but ship TL `install.js` in the tarball (clear PR diff).
+1. **Replace or add helper file** — keep `"postinstall": "node install.js"` (or `"install": "node install.js"`) and ship TL `install.js` in the tarball. Source it from a recipe sibling (e.g. `tl-install.js`) or patch upstream — clear PR diff.
 2. **Publish with install scripts stripped** — only if optional deps are always resolved from Pulp and org policy allows `npm install --ignore-scripts` for edge cases.
 3. **Broad `scripts` rewrites** — avoid unless necessary; increases review burden and drift from upstream.
 
@@ -563,6 +581,7 @@ AI must **not** run inside the hermetic build with registry credentials or trigg
 | OS / arch | linux-x64                                   |
 | libc      | glibc (UBI)                                 |
 | Node      | 20 LTS (example; pin per builder image tag) |
+| Factory toolchain | Must satisfy **onboarded** native builds (e.g. node-gyp, C++ standard). Raising compiler requirements is a **`plumbing` npm-builder** change (gcc-toolset on UBI 8, or newer UBI base), not a per-recipe version downgrade. |
 | Registry  | **Prod:** TL npm registry for installs; **Stage:** PR builds only; **L1/L2** may mix upstream npm for missing deps per `tl-compliance.json` |
 
 
