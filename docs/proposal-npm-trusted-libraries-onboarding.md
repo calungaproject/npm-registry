@@ -174,7 +174,7 @@ Machine-readable metadata for CI and review.
 }
 ```
 
-Do **not** author `compliance_level` or `closure_gaps` in the onboarding manifest. The pipeline **computes** them after querying the TL registry and **writes** them into published packages (and attestations). See [Where compliance metadata is stored](#where-compliance-metadata-is-stored).
+Do **not** author `compliance_level` or `closure_gaps` in the onboarding manifest. The pipeline **computes** them on **on-push** after querying the TL registry and writes them as **sidecars** (not inside consumer packages). See [Where compliance metadata is stored](#where-compliance-metadata-is-stored).
 
 Fields are illustrative; JSON Schema to be added in the onboarding repo.
 
@@ -258,17 +258,20 @@ Compliance describes **where production dependencies may resolve at `npm install
 | **L2** | `direct-closure` | **Direct** prod `dependencies` + required **TL platform packages** for those deps (pinned versions) must be on TL; transitive deps may still use npmjs | Most packages before full tree exists |
 | **L3** | `full-closure` | **Entire production lockfile closure** for this package resolves **only** from TL registry (linux-x64 v1); **no npmjs** for prod tree | Target for production apps; “highest” compliance |
 
-**Computing the level (pipeline):**
+**Computing the level (on-push pipeline):**
 
-1. On merge, manifest lists `requires_tl_packages` (direct prod deps + platform packages for Tier B deps — AI may draft, human confirms).
-2. After build, factory queries Pulp (or onboarding repo index) for each pinned `name@version`.
-3. Write `compliance_level`, `closure_gaps`, and **`assessed_at`** (UTC timestamp) into **`tl-compliance.json`** (main tarball) and **`artifact.json`** (platform tarball); include the same fields in the **attestation predicate**.
+1. Manifest lists `requires_tl_packages` (direct prod deps + platform packages for Tier B/C — AI may draft, human confirms).
+2. On **push to main**, promote pipeline queries TL registry (Prod, and Stage if present) for each pinned `name@version`.
+3. Write `compliance_level`, `closure_gaps`, and **`assessed_at`** (UTC) into **sidecar** JSON files next to the package tarballs in the Quay OCI snapshot — **not** inside the `.tgz` consumers install.
+4. Release copies those sidecars into Pulp as **adjacent, queryable** compliance records (labels and/or companion content). Optional: same fields in the **attestation predicate** at release.
+
+**Why not inside the package?** Compliance is a **Trusted Libraries KPI / catalog property**, not part of the upstream library API. End users installing from Pulp should get a clean tarball (source-built bits + SBOM). Operators and dashboards query Pulp (or the OCI snapshot) for level without unpacking `.tgz` files.
 
 **Point-in-time assertion (no compliance republish):**
 
 - TL publishes **`name@version` matching upstream semver only** (e.g. `vite@5.4.0`). No TL-specific suffixes (`5.4.0+tl.1`) to “bump” compliance.
-- **`compliance_level` is fixed for that publish** — a snapshot of the registry **at factory run time**. It is embedded in the tarball and attestation and **does not change** when dependencies are onboarded later.
-- Onboarding **`esbuild@0.28.0` later does not upgrade `vite@5.4.0` from L2 to L3** on the registry. `vite@5.4.0` remains L2 as published; consumers read that from `tl-compliance.json` / attestations.
+- **`compliance_level` is fixed for that publish** — a snapshot of the registry **at on-push assess time**. It is stored beside the artifact and **does not change** when dependencies are onboarded later.
+- Onboarding **`esbuild@0.28.0` later does not upgrade `vite@5.4.0` from L2 to L3** on the registry. `vite@5.4.0` remains L2 as published; operators read that from the Pulp compliance record / OCI sidecar.
 - **Higher compliance comes from new upstream versions:** when `vite@5.5.0` is onboarded and the closure is fuller, that **new** `name@version` may ship as L3. Over time, **most actively maintained versions** are onboarded when the tree is mature → **most new publishes are L3**; older pins may stay L1/L2 historically.
 
 **Re-publish same semver** only for **recipe/security fixes** (bad build, wrong ref, CVE rebuild policy) — not to refresh compliance labels. That is a separate org policy from closure level.
@@ -285,19 +288,34 @@ Compliance describes **where production dependencies may resolve at `npm install
 
 ## Where compliance metadata is stored
 
-Use **layered** storage so humans, npm clients, and attestations see the same level.
+Compliance is a **TL catalog / KPI record**, kept **outside** the consumer-installable package. Layered storage:
 
-| Location | File / field | Who writes | Audience |
-| -------- | ------------ | ---------- | -------- |
-| **Onboarding repo** | `manifest.json` → `requires_tl_packages` only (plus source, outputs, scripts) | Human / AI in PR | CI **input** for closure computation |
-| **Main npm tarball** | `tl-compliance.json` at package root (include in `package.json` `files`) | **Pipeline** after build | Consumers, catalog tools, compliance dashboards |
-| **Platform tarball** | `artifact.json` | **Pipeline** | Binary identity + **same** `compliance_level` / `closure_gaps` as main |
-| **Attestation predicate** | `compliance_level`, `closure_gaps`, `source.ref`, `entrypoint_digest` | **Pipeline** | Sigstore / EC verification |
-| **Pulp** (optional later) | Content attributes mirroring `compliance_level` | **Pipeline** | Registry search without unpacking |
+| Location | File / field | Who writes | When | Audience |
+| -------- | ------------ | ---------- | ---- | -------- |
+| **Onboarding repo** | `manifest.json` → `requires_tl_packages` only | Human / AI in PR | Authoring | CI **input** for closure computation |
+| **Quay OCI snapshot** (`:<merge-sha>.npm`) | Sidecar next to each `.tgz` (see naming below) | **on-push** promote pipeline | After merge | Release input; audit |
+| **Pulp Prod** | Adjacent compliance object + content labels on the package unit | **Release** pipeline | Publish | **Operators / dashboards** — query by `name@version` **without** unpacking the tarball |
+| **Attestation predicate** (optional) | `compliance_level`, `closure_gaps`, `assessed_at` | **Release** (with sign) | Release | Sigstore / EC verification |
 
-**Authoring rule:** `manifest.json` declares **what to check** (`requires_tl_packages`). **CI declares the result** (`compliance_level`, `closure_gaps`) on artifacts consumers install — not in the merged manifest unless an optional bot documents last publish.
+**Not stored in:** the published main or platform `.tgz` (no `tl-compliance.json` / compliance fields inside `package/` for end users).
 
-**`tl-compliance.json`** (main package) — logical **npm name@version**:
+**Authoring rule:** `manifest.json` declares **what to check** (`requires_tl_packages`). **on-push CI declares the result** as sidecars; release mirrors that into Pulp for query.
+
+### OCI sidecar naming (on-push snapshot)
+
+One sidecar per published npm identity (main and each platform output), sitting beside the tarball in the flat OCI artifact:
+
+```text
+vite-5.4.0.tgz
+vite-5.4.0.tl-compliance.json
+@calunga/esbuild-linux-x64-0.28.0.tgz
+@calunga/esbuild-linux-x64-0.28.0.tl-compliance.json
+… (SBOMs remain embedded inside each .tgz under package/sboms/)
+```
+
+Platform packages share the **same** `compliance_level` / `closure_gaps` as the sibling main package from the same recipe (one manifest → one compliance story), and may add binary identity fields.
+
+**`*.tl-compliance.json`** shape:
 
 ```json
 {
@@ -316,30 +334,37 @@ Use **layered** storage so humans, npm clients, and attestations see the same le
     "url": "https://github.com/vitejs/vite.git",
     "ref": "v5.4.0"
   },
-  "manifest_entrypoint_digest": "sha256:..."
+  "tarball": "vite-5.4.0.tgz",
+  "tarball_sha256": "…",
+  "manifest_entrypoint_digest": "sha256:…"
 }
 ```
 
-**`artifact.json`** (platform package) — **binary artifact** metadata; includes the **same** `compliance_level` and `closure_gaps` as sibling main package (one manifest entry → one compliance story):
+Platform sidecar example (same level, plus layout):
 
 ```json
 {
   "name": "@calunga/esbuild-linux-x64",
   "version": "0.28.0",
-  "platform": { "os": "linux", "cpu": "x64", "libc": "glibc" },
-  "node_abi": "115",
-  "built_from": {
-    "url": "https://github.com/evanw/esbuild.git",
-    "ref": "v0.28.0"
-  },
-  "builder_image_digest": "sha256:...",
-  "entrypoint_digest": "sha256:...",
   "compliance_level": "L3",
-  "closure_gaps": []
+  "assessed_at": "2026-05-20T14:32:00Z",
+  "closure_gaps": [],
+  "platform": { "os": "linux", "cpu": "x64", "libc": "glibc" },
+  "tarball": "@calunga/esbuild-linux-x64-0.28.0.tgz",
+  "tarball_sha256": "…",
+  "sibling_main": "esbuild@0.28.0"
 }
 ```
 
-**Rule:** `artifact.json` is **not** a substitute for `tl-compliance.json` on the main package — platform pkg holds **binary/layout** fields; main pkg holds the **primary** catalog record for the npm package name consumers depend on. Both repeat `compliance_level` so installing only the platform optional still shows level.
+### Pulp: query without unpacking
+
+Release **does not** stuff compliance into the npm tarball. It:
+
+1. Publishes each `.tgz` to the npm repository (consumer install path stays clean).
+2. Uploads each `*.tl-compliance.json` as an **adjacent** Pulp artifact (companion content or a small TL “compliance” repository), keyed by `name` + `version`.
+3. Sets **Pulp content labels / attributes** on the package unit, e.g. `tl.compliance_level=L2`, `tl.assessed_at=…`, so a simple Pulp API filter answers “what is the level for `vite@5.4.0`?” without downloading or extracting the package.
+
+Exact Pulp content type (labels-only vs file companion) is an implementation detail; the contract is: **one queryable record per `name@version` next to the package, not inside it.**
 
 ---
 
@@ -363,20 +388,20 @@ Exact scope (`@calunga` vs `@redhat-trusted-libraries`) is an open decision; mus
 ```text
 package/
   bin/<tool>              # or sharp.node path per recipe
-  artifact.json           # platform build identity + compliance_level (see above)
   README.md
   package.json
+  sboms/*.cdx.json        # embedded CycloneDX (build-time)
 ```
 
 Main package layout additionally includes:
 
 ```text
 package/
-  tl-compliance.json      # closure level + gaps for this name@version
-  sboms/                  # optional CycloneDX
+  sboms/*.cdx.json        # embedded CycloneDX (build-time)
   ...
 ```
 
+Compliance sidecars (`*.tl-compliance.json`) live **next to** the `.tgz` in the Quay/Pulp transport layer — not under `package/`.
 Main package includes a **TL-maintained or onboarding-supplied** install shim (reviewed in PR) that:
 
 1. Resolves `@calunga/<name>-linux-x64` from **TL registry URL** (this package’s platform output).
@@ -405,7 +430,7 @@ Upstream dev scripts (`test`, `lint`, `docs-build`) are normally **absent** from
 | ----- | ----------------- |
 | `optionalDependencies` | Rename platform deps to `@calunga/<name>-linux-x64` (or chosen scope) |
 | `install` / `postinstall` | Point at TL-reviewed shim (see below) |
-| `files` | Add `tl-compliance.json`, SBOM paths (e.g. `sboms/*.cdx.json`) |
+| `files` | Add SBOM paths (e.g. `sboms/*.cdx.json`); **not** compliance JSON |
 | `prepare` | Often **removed** or omitted from published package so install does not trigger builds |
 
 Usually **unchanged**: `name`, `version`, `main` / `exports`, `dependencies` for pure JS deps, public API.
@@ -432,7 +457,7 @@ The **platform package** uses a **new** minimal `package.json` (binary layout on
 2. **Publish with install scripts stripped** — only if optional deps are always resolved from Pulp and org policy allows `npm install --ignore-scripts` for edge cases.
 3. **Broad `scripts` rewrites** — avoid unless necessary; increases review burden and drift from upstream.
 
-Default: **(1)**. No silent fallback to npmjs for **this package’s** `@calunga/*` platform optional. At **L1**, other dependencies may still use npmjs — document in `tl-compliance.json` `closure_gaps`.
+Default: **(1)**. No silent fallback to npmjs for **this package’s** `@calunga/*` platform optional. At **L1**, other dependencies may still use npmjs — document gaps in the **compliance sidecar** / Pulp record (`closure_gaps`).
 
 #### PR review checklist (scripts)
 
@@ -467,46 +492,44 @@ PR → calunga-npm-onboarding
 ├─ verify: package.json version at source.ref matches upstream_npm.version
 ├─ run build.entrypoint.sh in builder image  → all outputs[] (main + platform)
 ├─ run verify.smoke.sh
-├─ cyclonedx / SBOM for collected artifacts
-├─ compute compliance_level (L1–L3) + closure_gaps + assessed_at
-├─ embed tl-compliance.json (main) + artifact.json (platform) in tarballs
-├─ cosign attest each output .tgz (predicate: digests, source.ref, entrypoint_digest,
-│    compliance_level, closure_gaps, assessed_at)
-└─ npm publish all outputs[] → Pulp Stage only
+├─ embed CycloneDX SBOM into each collected .tgz (package/sboms/*.cdx.json)
+└─ oras push → Quay on-pr-<sha>.npm  (tarballs only; no compliance sidecar yet)
+     (optional Pulp Stage publish when enabled — PoC may skip Stage)
 │
 ▼ human review + merge
 │
-▼ on-push (PipelineRun: push → main)
-├─ identify packages promoted by this merge (same identify logic; prev ref HEAD^)
-├─ download matching name@version tarballs (+ attest sidecars) from Pulp Stage
-├─ verify: cosign / attestation (signatures, predicate matches tarball digest)
-├─ verify: optional EC policy on attestation + SBOM
-└─ oras push → Quay OCI artifact
+▼ on-push (PipelineRun: push → main)  — promote + compliance assess
+├─ identify packages promoted by this merge (prev ref HEAD^)
+├─ resolve on-pr-<merge-sha>.npm (or agreed policy); verify SBOM-in-tarball
+├─ compute compliance_level (L1–L3) + closure_gaps + assessed_at
+│    (query TL Prod [+ Stage] for requires_tl_packages)
+├─ write *.tl-compliance.json sidecars next to each .tgz
+└─ oras push → Quay durable snapshot
      e.g. quay.io/.../calunga-npm-onboarding:<merge-sha>.npm
-     artifact-type: application/vnd.npm.packages (or equivalent)
-     (no rebuild; promotes Stage bits already attested on PR)
+     contents: *.tgz (+ embedded sboms) + *.tl-compliance.json
 │
 ▼ Release (ReleasePlan → rhtap-releng-tenant, auto-release on snapshot)
-├─ download packages from Quay OCI artifact (oras pull)
-├─ verify: attestation + signature (again at release boundary)
-└─ npm publish all outputs[] → Pulp Prod
+├─ oras pull Quay snapshot
+├─ cosign attest each .tgz (release SA / KMS; optional compliance fields in predicate)
+├─ npm publish each .tgz → Pulp Prod  (consumer packages stay clean)
+└─ publish compliance: upload *.tl-compliance.json as adjacent Pulp records
+     + set content labels (tl.compliance_level, …) for query without unpack
 │
 ▼ consumers: npm install --registry <TL Pulp Prod>
-              read compliance from tl-compliance.json (point-in-time for that name@version)
+▼ operators: Pulp API / labels → compliance_level for name@version
 ```
-
 ### Stage vs prod (review notes)
 
 | Stage | When | Rebuild? | Registry | Consumer use |
 | ----- | ---- | -------- | -------- | -------------- |
-| **Pulp Stage** | `on-pr` | **Yes** — full factory from git source | Internal stage npm registry | PR validation, optional manual `npm install` against stage; **not** production |
-| **Quay OCI** | `on-push` | **No** — copy from Stage after verify | `…/calunga-npm-onboarding:<sha>.npm` | Transport + release input (same role as Python `…:<sha>.wheel`) |
-| **Pulp Prod** | **Release** | **No** — copy from Quay after verify | `packages.redhat.com/...` (prod TL npm) | Production installs |
+| **Pulp Stage** (optional) | `on-pr` | **Yes** — full factory from git source | Internal stage npm registry | PR validation; **not** production |
+| **Quay OCI (on-pr)** | `on-pr` | **Yes** | `…:on-pr-<sha>.npm` | Ephemeral PR artifact (tarballs + in-tarball SBOM) |
+| **Quay OCI (snapshot)** | `on-push` | **No** — promote + **assess compliance** | `…:<merge-sha>.npm` | Release input: tarballs + `*.tl-compliance.json` sidecars |
+| **Pulp Prod** | **Release** | **No** | `packages.redhat.com/...` | Production installs; compliance via **labels / adjacent records** |
 
-**Alignment with Python:** Python **on-push** builds wheels and pushes **directly to Quay** (no Pulp Stage). npm adds **Stage on PR** so reviewers can test published layout before merge; **on-push** then **promotes** Stage → Quay instead of rebuilding (unless org later chooses rebuild-on-push — not default here).
+**Alignment with Python:** Python **on-push** builds wheels and pushes **directly to Quay** (no Pulp Stage). npm PoC similarly uses Quay for transport; Stage is optional. **Compliance assess runs on-push** (when the durable snapshot is formed), not inside consumer packages.
 
-**Compliance:** Level is computed on **PR build** (query TL Prod + Stage registry for `requires_tl_packages` at `assessed_at`), embedded in tarballs, and **carried unchanged** through Quay → Pulp Prod. Later onboarding of deps does **not** republish the same semver to bump level ([point-in-time assertion](#dependency-closure-compliance-l1-l2-l3)).
-
+**Compliance:** Level is computed on **on-push** (query TL registry for `requires_tl_packages` at `assessed_at`), stored as OCI sidecars, then mirrored to Pulp at release. Later onboarding of deps does **not** republish the same semver to bump level ([point-in-time assertion](#dependency-closure-compliance-l1-l2-l3)).
 **PR vs merge commit:** Stage publish uses **PR head** revision. Merge promotion assumes the **merged PR** built successfully on that head (or final push to PR branch). If `main` moves without a fresh PR build, policy should require a green `on-pr` on the merge commit or re-trigger build — open operational detail.
 
 ### Triggers (Pipelines-as-Code)
@@ -527,24 +550,24 @@ PR → calunga-npm-onboarding
 4. Install-script policy on built tree — [Published `package.json` and scripts policy](#published-packagejson-and-scripts-policy).  
 5. Human TL reviewer approval.
 
-**on-pr (before Stage publish)**
+**on-pr (before Quay on-pr push)**
 
-6. SBOM generated.  
-7. `tl-compliance.json` + `artifact.json` embedded.  
-8. cosign attest on each `.tgz`.
+6. SBOM embedded in each `.tgz`.  
+7. (No compliance sidecar yet — deferred to on-push.)
 
 **on-push (fail merge pipeline)**
 
-9. Every promoted package exists on Pulp Stage at pinned version.  
-10. Attestation verifies against tarball digest.  
-11. oras push to Quay succeeds.
+8. Resolve on-pr artifact for merge SHA; SBOM-in-tarball checks.  
+9. Compute `compliance_level` + write `*.tl-compliance.json` sidecars.  
+10. oras push durable Quay snapshot (tarballs + compliance sidecars).
 
 **release (fail release / no Prod publish)**
 
-12. Re-verify attestations on Quay artifact.  
-13. EC / CVE policy when wired.  
-14. Prod publish only from release pipeline service account.
-
+11. Re-verify snapshot contents.  
+12. cosign attest `.tgz` (KMS); optional compliance fields in predicate.  
+13. Publish `.tgz` to Pulp Prod; publish compliance as **adjacent** records + labels.  
+14. EC / CVE policy when wired.  
+15. Prod publish only from release pipeline service account.
 ### Python `index` parallel
 
 | Step | Python | npm TL (this proposal) |
@@ -582,7 +605,7 @@ AI must **not** run inside the hermetic build with registry credentials or trigg
 | libc      | glibc (UBI)                                 |
 | Node      | 20 LTS (example; pin per builder image tag) |
 | Factory toolchain | Must satisfy **onboarded** native builds (e.g. node-gyp, C++ standard). Raising compiler requirements is a **`plumbing` npm-builder** change (gcc-toolset on UBI 8, or newer UBI base), not a per-recipe version downgrade. |
-| Registry  | **Prod:** TL npm registry for installs; **Stage:** PR builds only; **L1/L2** may mix upstream npm for missing deps per `tl-compliance.json` |
+| Registry  | **Prod:** TL npm registry for installs; **Stage:** optional PR builds; **L1/L2** may mix upstream npm for missing deps per compliance sidecar `closure_gaps` |
 
 
 musl / arm64: out of scope until v1.1 manifests declare additional `outputs`.
@@ -616,7 +639,7 @@ musl / arm64: out of scope until v1.1 manifests declare additional `outputs`.
 | Malicious entrypoint              | PR review, shellcheck, no secrets in repo, hermetic egress, no cosign in script |
 | Recipe drift                      | Rebuild on manifest merge; optional nightly rebuild                             |
 | Transitive natives                | One manifest builds main + platform; separate onboard entry per dep over time   |
-| Consumer uses npmjs at L1         | Document in `tl-compliance.json`; raise level as deps publish to TL           |
+| Consumer uses npmjs at L1         | Document in compliance sidecar / Pulp labels; raise level as deps publish to TL |
 | Builder compromise                | Standard Konflux trusted tasks, image digest pins, EC                           |
 | Over-reliance on AI               | Human approval required; AI outside sign path                                   |
 
