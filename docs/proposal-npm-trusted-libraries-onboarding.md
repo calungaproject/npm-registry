@@ -310,7 +310,7 @@ vite-5.4.0.tgz
 vite-5.4.0.tl-compliance.json
 @calunga/esbuild-linux-x64-0.28.0.tgz
 @calunga/esbuild-linux-x64-0.28.0.tl-compliance.json
-… (SBOMs remain embedded inside each .tgz under package/sboms/)
+… (SBOMs remain embedded inside each .tgz under package/sboms/redhat.spdx.json)
 ```
 
 Platform packages share the **same** `compliance_level` / `closure_gaps` as the sibling main package from the same recipe (one manifest → one compliance story), and may add binary identity fields.
@@ -390,14 +390,14 @@ package/
   bin/<tool>              # or sharp.node path per recipe
   README.md
   package.json
-  sboms/*.cdx.json        # embedded CycloneDX (build-time)
+  sboms/redhat.spdx.json  # Syft SPDX (build-time; Python wheel parity)
 ```
 
 Main package layout additionally includes:
 
 ```text
 package/
-  sboms/*.cdx.json        # embedded CycloneDX (build-time)
+  sboms/redhat.spdx.json  # Syft SPDX (build-time; Python wheel parity)
   ...
 ```
 
@@ -430,7 +430,7 @@ Upstream dev scripts (`test`, `lint`, `docs-build`) are normally **absent** from
 | ----- | ----------------- |
 | `optionalDependencies` | Rename platform deps to `@calunga/<name>-linux-x64` (or chosen scope) |
 | `install` / `postinstall` | Point at TL-reviewed shim (see below) |
-| `files` | Add SBOM paths (e.g. `sboms/*.cdx.json`); **not** compliance JSON |
+| `files` | Add SBOM path `sboms/redhat.spdx.json`; **not** compliance JSON |
 | `prepare` | Often **removed** or omitted from published package so install does not trigger builds |
 
 Usually **unchanged**: `name`, `version`, `main` / `exports`, `dependencies` for pure JS deps, public API.
@@ -492,7 +492,7 @@ PR → calunga-npm-onboarding
 ├─ verify: package.json version at source.ref matches upstream_npm.version
 ├─ run build.entrypoint.sh in builder image  → all outputs[] (main + platform)
 ├─ run verify.smoke.sh
-├─ embed CycloneDX SBOM into each collected .tgz (package/sboms/*.cdx.json)
+├─ embed SPDX SBOM into each collected .tgz (Syft → package/sboms/redhat.spdx.json)
 └─ oras push → Quay on-pr-<sha>.npm  (tarballs only; no compliance sidecar yet)
      (optional Pulp Stage publish when enabled — PoC may skip Stage)
 │
@@ -621,7 +621,7 @@ musl / arm64: out of scope until v1.1 manifests declare additional `outputs`.
 | Pin         | `version`, `ignored_versions` | `version` + **`source.ref`** + scripts                                      |
 | Build logic | **Fromager** (central)        | **`build.entrypoint.sh`** (per package)                                     |
 | Builder     | `plumbing` calunga-builder    | **`plumbing` npm-builder image(s)**                                         |
-| Artifact    | wheel + SPDX                  | npm tarball + **TL platform package**                                       |
+| Artifact    | wheel + SPDX (`redhat.spdx.json`) | npm tarball + SPDX (`redhat.spdx.json` via Syft) + **TL platform package** |
 | PR output   | Quay OCI (`on-pr-*`)          | **Pulp Stage** (+ attest)                                                   |
 | Merge output| Quay OCI (`:<sha>.wheel`)     | Quay OCI (`:<sha>.npm`) from Stage promotion                                |
 | Consumer    | Pulp PyPI prod                | **Pulp npm prod**                                                           |
@@ -747,7 +747,7 @@ Run agents as **advisors** on read-only inputs; humans approve PRs; pipeline rem
 | Layer | Approach |
 | ----- | -------- |
 | Fetch integrity | `upstream_npm.integrity`, tarball shasum checks in CI |
-| CVE / license | Grype, Trivy, or osv-scanner on CycloneDX from pipeline |
+| CVE / license | Grype, Trivy, or osv-scanner on SPDX from package SBOM |
 | Malware | ClamAV on collected artifacts (optional Konflux task) |
 | Provenance | cosign attest on each published `.tgz` |
 | Policy | Enterprise Contract on Konflux results |
