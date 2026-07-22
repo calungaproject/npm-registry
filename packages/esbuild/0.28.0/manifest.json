@@ -1,0 +1,39 @@
+{
+  "name": "esbuild",
+  "version": "0.28.0",
+  "description": "JavaScript bundler — TL linux-x64 binary + JS wrapper",
+  "native_tier": "B",
+  "source": {
+    "url": "https://github.com/evanw/esbuild.git",
+    "ref": "v0.28.0",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "0.28.0"
+  },
+  "builder": {
+    "image": "quay.io/redhat-user-workloads/calunga-tenant/npm-builder",
+    "image_digest_pin": "sha256:d2e3123ba0bdc9717043d4bc0d3127849b14423c665f6b399d4181f502785a58"
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/esbuild-0.28.0.tgz",
+      "pulp_name": "esbuild"
+    },
+    {
+      "id": "linux-x64-binary",
+      "type": "tl-platform-package",
+      "path": "out/@calunga/esbuild-linux-x64-0.28.0.tgz",
+      "pulp_name": "@calunga/esbuild-linux-x64",
+      "platform": "linux-x64",
+      "libc": "glibc"
+    }
+  ],
+  "optional_dependencies_published": [
+    "@calunga/esbuild-linux-x64@0.28.0"
+  ]
+}
