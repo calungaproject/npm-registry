@@ -1,0 +1,35 @@
+{
+  "name": "better-sqlite3",
+  "version": "11.8.1",
+  "description": "Fast SQLite library for Node.js — TL linux-x64 native addon compiled from source",
+  "native_tier": "C",
+  "source": {
+    "url": "https://github.com/WiseLibs/better-sqlite3.git",
+    "ref": "v11.8.1",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "11.8.1"
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/better-sqlite3-11.8.1.tgz",
+      "pulp_name": "better-sqlite3"
+    },
+    {
+      "id": "linux-x64-addon",
+      "type": "tl-platform-package",
+      "path": "out/@calunga/better-sqlite3-linux-x64-11.8.1.tgz",
+      "pulp_name": "@calunga/better-sqlite3-linux-x64",
+      "platform": "linux-x64",
+      "libc": "glibc"
+    }
+  ],
+  "optional_dependencies_published": [
+    "@calunga/better-sqlite3-linux-x64@11.8.1"
+  ]
+}
