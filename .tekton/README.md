@@ -32,7 +32,13 @@ On merge to `main`, promotes the matching **`on-pr-<sha>.npm`** artifact to a du
 | `source-npm-image` | `…/calunga-npm-registry-main:on-pr-{{revision}}.npm` |
 | `prev-packages-ref` | `HEAD^` |
 
-Promote **fails** if there is no green on-pr build for that SHA (by design).
+Promote **skips on-pr pull** when `identify-packages` returns `no-packages` (infra-only
+merges); it still pushes a durable `.keep` OCI so the PipelineRun stays green.
+
+Promote **fails** on `has-packages` if there is no on-pr OCI for `source-npm-image`.
+Note: GitHub merge/squash commits usually have a **different SHA** than the PR head
+that built `on-pr-<sha>.npm`, so package promotes need a matching strategy (same
+commit on main as the PR build, or resolve the PR artifact by digest / PR metadata).
 
 ## Bootstrap checklist
 
