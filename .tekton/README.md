@@ -1,8 +1,8 @@
 # npm-registry Tekton
 
-## Pipeline
+## Pipelines
 
-`build-pipeline.yaml` defines pipeline **`build-npm`** (Phase 1 — PR build to Quay OCI).
+### `build-npm` (PR) — `build-pipeline.yaml`
 
 ```text
 init → clone-repository → lint-manifests → identify-packages → build-npm-package
@@ -11,9 +11,28 @@ init → clone-repository → lint-manifests → identify-packages → build-npm
 Built tarballs are pushed as an OCI artifact to
 `$(output-image).npm` (e.g. `.../calunga-npm-registry-main:on-pr-<sha>.npm`, 5d TTL).
 Pipeline `IMAGE_URL` / `IMAGE_DIGEST` come from the trusted **`build-npm-package`**
-task (same pattern as Python `build-wheels`), not an inline pipeline step.
+task (same pattern as Python `build-wheels`).
 
 `calunga-npm-registry-main-pull-request.yaml` triggers on PRs to `main`.
+
+### `promote-npm` (push) — `promote-pipeline.yaml`
+
+```text
+init → clone-repository → identify-packages → promote-npm-oci
+```
+
+On merge to `main`, promotes the matching **`on-pr-<sha>.npm`** artifact to a durable
+`:<sha>.npm` snapshot (SBOM verify + compliance sidecars). **No rebuild.**
+
+`calunga-npm-registry-main-push.yaml` sets:
+
+| Param | Value |
+| ----- | ----- |
+| `output-image` | `…/calunga-npm-registry-main:{{revision}}` → OCI `….npm` |
+| `source-npm-image` | `…/calunga-npm-registry-main:on-pr-{{revision}}.npm` |
+| `prev-packages-ref` | `HEAD^` |
+
+Promote **fails** if there is no green on-pr build for that SHA (by design).
 
 ## Bootstrap checklist
 
@@ -21,23 +40,20 @@ Konflux **Application / Component / ECP / integration test** for `calunga-npm-re
 are GitOps-managed in
 [`konflux-release-data`](../../konflux-release-data/tenants-config/cluster/kflux-prd-rh03/tenants/calunga-tenant/npm/).
 
-Plumbing (`npm-builder`, `task-build-npm-package`) stays UI-managed under `calunga-v2`.
+Plumbing (`npm-builder`, `task-build-npm-package`, `task-promote-npm-oci`) stays UI-managed
+under `calunga-v2`.
 
 1. Merge `konflux-release-data` PR; wait for Argo sync to `calunga-tenant`.
-2. If you previously created `calunga-npm-registry-main` in the UI, remove the duplicate.
-3. **Task bundle digest** — after `task-build-npm-package` is on Quay (UI component), update
-   `task-build-npm-package-bundle` in this PipelineRun.
-4. **Builder image** — keep `builder-image` in the PipelineRun in sync with Quay `npm-builder`.
+2. **Task bundle digests** — keep PipelineRun pins in sync with Quay:
+   - PR: `task-build-npm-package-bundle`
+   - push: `task-promote-npm-oci-bundle`
+3. **Builder image** — keep `builder-image` in both PipelineRuns in sync with Quay `npm-builder`.
 
 ## Viewing OCI artifacts
 
-PR builds push tarballs to a **private** Quay repo (`calunga-npm-registry-main`).
+Builds push to a **private** Quay repo (`calunga-npm-registry-main`).
 Do **not** expect to browse it at `quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-registry-main`
 unless a Quay admin has granted your user Read on that repo.
-
-This repo is GitOps-managed (`ImageRepository` in `konflux-release-data`), unlike plumbing
-components such as `task-build-npm-package` (UI-created under `calunga-v2`), where the creator
-is often on the Quay repo ACL automatically.
 
 **Inspect builds in Konflux UI:**
 
@@ -47,15 +63,13 @@ is often on the Quay repo ACL automatically.
    proxy login (not a direct `quay.io` URL). See
    [Accessing private image repositories](https://konflux-ci.dev/docs/building/accessing-private-images/).
 
-CI already runs each recipe's `verify.smoke.sh` before push; manual pull is optional audit.
-
 ## Pulp Stage (deferred)
 
 The build task still supports optional `publish-to-pulp` when a stage npm repo exists.
-No ExternalSecret or Vault wiring is required for Phase 1 Quay-only output.
+No ExternalSecret or Vault wiring is required for Quay-only output.
 
-## No packages in this PR
+## No packages in this change
 
-With no changes under `packages/`, `identify-packages` returns `no-packages` and
-`build-npm-package` pushes an empty `.npm` OCI artifact (`.keep` only) and emits
-`IMAGE_URL` / `IMAGE_DIGEST` for Snapshot / EC.
+With no changes under `packages/`, `identify-packages` returns `no-packages`.
+PR build still pushes an empty `.npm` OCI (`.keep`); push promote copies that to the
+durable tag (compliance skipped when there are no tarballs).

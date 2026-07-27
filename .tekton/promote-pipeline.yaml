@@ -1,0 +1,151 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: promote-npm
+spec:
+  description: |
+    npm Trusted Libraries — on-push promote pipeline.
+    Identifies packages from the merge (HEAD^), promotes the matching
+    on-pr-<sha>.npm Quay OCI artifact to a durable :<sha>.npm snapshot
+    (verify SPDX SBOM + assess compliance). No rebuild.
+  params:
+    - name: git-url
+      type: string
+    - name: revision
+      type: string
+      default: ""
+    - name: output-image
+      description: Durable Quay tag prefix; npm packages land at $(output-image).npm
+      type: string
+    - name: source-npm-image
+      description: >-
+        PR OCI artifact to promote (…:on-pr-<sha>.npm). Must exist from a green
+        PR build for the same commit SHA.
+      type: string
+    - name: image-expires-after
+      description: Empty for durable snapshot tags
+      type: string
+      default: ""
+    - name: prev-packages-ref
+      type: string
+      default: "HEAD^"
+    - name: git-clone-depth
+      type: string
+      default: "0"
+    - name: builder-image
+      description: Pinned npm-builder (identify scripts + promote verify/compliance)
+      type: string
+    - name: task-promote-npm-oci-bundle
+      description: Tekton bundle image for promote-npm-oci-ta
+      type: string
+    - name: skip-checks
+      type: string
+      default: "false"
+    - name: rebuild
+      type: string
+      default: "false"
+  results:
+    - name: IMAGE_URL
+      value: $(tasks.promote-npm-oci.results.IMAGE_URL)
+    - name: IMAGE_DIGEST
+      value: $(tasks.promote-npm-oci.results.IMAGE_DIGEST)
+    - name: CHAINS-GIT_URL
+      value: $(tasks.clone-repository.results.url)
+    - name: CHAINS-GIT_COMMIT
+      value: $(tasks.clone-repository.results.commit)
+  tasks:
+    - name: init
+      params:
+        - name: image-url
+          value: $(params.output-image)
+        - name: rebuild
+          value: $(params.rebuild)
+        - name: skip-checks
+          value: $(params.skip-checks)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: init
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-init:0.4@sha256:5a423246792ac501ea279229b42ee57da9927da441c04b5c9ff86817b0856b08
+          - name: kind
+            value: task
+    - name: clone-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.revision)
+        - name: fetchTags
+          value: "true"
+        - name: depth
+          value: $(params.git-clone-depth)
+        - name: ociStorage
+          value: $(params.output-image).git
+        - name: ociArtifactExpiresAfter
+          value: $(params.image-expires-after)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: git-clone-oci-ta
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.2@sha256:e5ba1f8549e6a0f043629ef00bea7511957121e05304b688f40ff12304560f38
+          - name: kind
+            value: task
+      workspaces:
+        - name: basic-auth
+          workspace: git-auth
+    - name: identify-packages
+      params:
+        - name: SOURCE_ARTIFACT
+          value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+        - name: SCRIPT
+          value: |
+            ./hack/identify-packages '$(params.prev-packages-ref)' "${SCRIPT_OUTPUT_ARRAY}" "${SCRIPT_OUTPUT}"
+        - name: SCRIPT_RUNNER_IMAGE
+          value: $(params.builder-image)
+        - name: HERMETIC
+          value: "true"
+        - name: ociStorage
+          value: $(params.output-image).pkgs
+        - name: ociArtifactExpiresAfter
+          value: $(params.image-expires-after)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: run-script-oci-ta
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1@sha256:7fbaddc523c3a9dab583b0ed8508fa413cf27c0e725de5e5c8207bb33a0f519a
+          - name: kind
+            value: task
+    - name: promote-npm-oci
+      runAfter:
+        - identify-packages
+      params:
+        - name: SOURCE_IMAGE
+          value: $(params.source-npm-image)
+        - name: IMAGE
+          value: $(params.output-image).npm
+        - name: BUILDER_IMAGE
+          value: $(params.builder-image)
+        - name: SOURCE_ARTIFACT
+          value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+        - name: PACKAGES
+          value: $(tasks.identify-packages.results.SCRIPT_OUTPUT_ARRAY)
+        - name: IMAGE_EXPIRES_AFTER
+          value: $(params.image-expires-after)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: promote-npm-oci-ta
+          - name: bundle
+            value: $(params.task-promote-npm-oci-bundle)
+          - name: kind
+            value: task
+  workspaces:
+    - name: git-auth
+      optional: true
