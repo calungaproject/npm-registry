@@ -2,6 +2,9 @@ apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: promote-npm
+  labels:
+    # Conforma pipeline-required-tasks selector (see plumbing/policy-data/).
+    pipelines.openshift.io/runtime: promote-npm
 spec:
   description: |
     npm Trusted Libraries — on-push promote pipeline.

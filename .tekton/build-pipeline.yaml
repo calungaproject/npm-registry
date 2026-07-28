@@ -2,6 +2,9 @@ apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: build-npm
+  labels:
+    # Conforma pipeline-required-tasks selector (see plumbing/policy-data/).
+    pipelines.openshift.io/runtime: build-npm
 spec:
   description: |
     npm Trusted Libraries onboarding — PR build pipeline.

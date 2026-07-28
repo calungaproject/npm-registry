@@ -14,6 +14,8 @@ metadata:
     appstudio.openshift.io/application: calunga-npm-registry-main
     appstudio.openshift.io/component: calunga-npm-registry-main
     pipelines.appstudio.openshift.io/type: build
+    # Conforma pipeline-required-tasks selector (fallback if build Task lacks build_type).
+    pipelines.openshift.io/runtime: build-npm
   name: calunga-npm-registry-main-on-pull-request
   namespace: calunga-tenant
 spec:
@@ -31,9 +33,9 @@ spec:
     - name: git-clone-depth
       value: "0"
     - name: builder-image
-      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder@sha256:9de06a22fd40563109fa6c758deb9d3b9f2bd56d173ad860c2d98c501da7d54a
+      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:6d3502c8cc14874eb808ff9c6e63f4bd9ea37d94@sha256:9de06a22fd40563109fa6c758deb9d3b9f2bd56d173ad860c2d98c501da7d54a
     - name: task-build-npm-package-bundle
-      value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package@sha256:27fe1a5a76bf949476732f6b3361f3e721a73ba82b5e7445515ba5843a02f47a
+      value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package:a5b3aeae8568be78be3a6f0fe38a29e07c0d2e87@sha256:7eceb8501b752447be03fd1a91a8921732bf9a7143ea25331c60b717d2c6e683
   taskRunTemplate:
     serviceAccountName: build-pipeline-calunga-npm-registry-main
   workspaces:
