@@ -13,7 +13,16 @@ Built tarballs are pushed as an OCI artifact to
 Pipeline `IMAGE_URL` / `IMAGE_DIGEST` come from the trusted **`build-npm-package`**
 task (same pattern as Python `build-wheels`).
 
-`calunga-npm-registry-main-pull-request.yaml` triggers on PRs to `main`.
+`calunga-npm-registry-main-pull-request.yaml` triggers on PRs to `main` **only when
+at least one non-README file under `packages/` changes** (PAC CEL on `files.all`).
+`packages/README.md` (or other `README` / `README.md` under `packages/`) alone does
+**not** start a build. Docs / `.tekton` / other infra-only PRs also do not.
+
+`hack/identify-packages` then selects **new** `packages/<name>/<version>/` dirs (or
+manifests whose `name`/`version` fields changed vs `prev-packages-ref`). In-place
+edits to an already-merged recipe are unsupported: the PipelineRun may still start,
+but identify returns `no-packages` and the build/promote fails. Contributors should
+add a new version directory instead (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 ### `promote-npm` (push) — `promote-pipeline.yaml`
 
@@ -24,7 +33,10 @@ init → clone-repository → identify-packages → promote-npm-oci
 On merge to `main`, promotes the matching **`on-pr-<sha>.npm`** artifact to a durable
 `:<sha>.npm` snapshot (SBOM verify + compliance sidecars). **No rebuild.**
 
-`calunga-npm-registry-main-push.yaml` sets:
+`calunga-npm-registry-main-push.yaml` triggers on push to `main` **only when at
+least one non-README file under `packages/` changes** (same CEL as PR). Infra-only
+merges and README-only package-tree edits do not promote, create a Snapshot, or
+auto-release.
 
 | Param | Value |
 | ----- | ----- |
@@ -32,13 +44,12 @@ On merge to `main`, promotes the matching **`on-pr-<sha>.npm`** artifact to a du
 | `source-npm-image` | `…/calunga-npm-registry-main:on-pr-{{revision}}.npm` |
 | `prev-packages-ref` | `HEAD^` |
 
-Promote **skips on-pr pull** when `identify-packages` returns `no-packages` (infra-only
-merges); it still pushes a durable `.keep` OCI so the PipelineRun stays green.
-
-Promote **fails** on `has-packages` if there is no on-pr OCI for `source-npm-image`.
-Note: GitHub merge/squash commits usually have a **different SHA** than the PR head
-that built `on-pr-<sha>.npm`, so package promotes need a matching strategy (same
-commit on main as the PR build, or resolve the PR artifact by digest / PR metadata).
+Promote **fails** if `PACKAGES_STATUS` is not `has-packages`, if the on-pr
+OCI is missing, or if the pulled artifact has no `.tgz` files. Note: GitHub
+merge/squash commits usually have a **different SHA** than the PR head that
+built `on-pr-<sha>.npm`, so package promotions need a matching strategy (same
+commit on main as the PR build, or resolve the PR artifact by digest / PR
+metadata).
 
 ## Bootstrap checklist
 
@@ -74,8 +85,9 @@ unless a Quay admin has granted your user Read on that repo.
 The build task still supports optional `publish-to-pulp` when a stage npm repo exists.
 No ExternalSecret or Vault wiring is required for Quay-only output.
 
-## No packages in this change
+## Testing PipelineRun / `.tekton` changes
 
-With no changes under `packages/`, `identify-packages` returns `no-packages`.
-PR build still pushes an empty `.npm` OCI (`.keep`); push promote copies that to the
-durable tag (compliance skipped when there are no tarballs).
+With the `packages/`-only CEL filter, editing `.tekton/` alone does **not** start
+PR or push PipelineRuns. For prod, add a dedicated on-PR path filter (e.g.
+`.tekton/***`) so PipelineRun changes can be exercised without a package bump —
+see [prod_followup.md](../docs/prod_followup.md).

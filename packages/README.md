@@ -10,4 +10,6 @@ packages/<name>/<version>/
   out/                  # factory output (gitignored)
 ```
 
-Add a new package in a dedicated PR following [CONTRIBUTING.md](../CONTRIBUTING.md).
+Add a **new** `packages/<name>/<version>/` in a dedicated PR following
+[CONTRIBUTING.md](../CONTRIBUTING.md). Do not modify an existing name/version directory
+after it has merged — onboard the next version instead.

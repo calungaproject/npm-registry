@@ -8,7 +8,9 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch == "main"
+    pipelinesascode.tekton.dev/on-cel-expression: >
+      event == "pull_request" && target_branch == "main" &&
+      files.all.exists(x, x.matches('^packages/') && !x.matches('(^|/)README(\\.md)?$'))
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: calunga-npm-registry-main
@@ -33,9 +35,9 @@ spec:
     - name: git-clone-depth
       value: "0"
     - name: builder-image
-      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:6d3502c8cc14874eb808ff9c6e63f4bd9ea37d94@sha256:9de06a22fd40563109fa6c758deb9d3b9f2bd56d173ad860c2d98c501da7d54a
+      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:cb1b686e859923f4122afacd39c8dd1f55268f44@sha256:c053e612ae01be54a8168a0f6c2d0c58e32cc62e7914bf2e1df7afb676f57c4b
     - name: task-build-npm-package-bundle
-      value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package:a5b3aeae8568be78be3a6f0fe38a29e07c0d2e87@sha256:7eceb8501b752447be03fd1a91a8921732bf9a7143ea25331c60b717d2c6e683
+      value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package:cb1b686e859923f4122afacd39c8dd1f55268f44@sha256:cb8b395cb5e933233a45c2f21500bb125fd3e66c617ba4534b7053c68eb85149
   taskRunTemplate:
     serviceAccountName: build-pipeline-calunga-npm-registry-main
   workspaces:
