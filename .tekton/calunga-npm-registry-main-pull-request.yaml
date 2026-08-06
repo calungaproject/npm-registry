@@ -37,7 +37,7 @@ spec:
     - name: builder-image
       value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:cb1b686e859923f4122afacd39c8dd1f55268f44@sha256:c053e612ae01be54a8168a0f6c2d0c58e32cc62e7914bf2e1df7afb676f57c4b
     - name: task-build-npm-package-bundle
-      value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package:cb1b686e859923f4122afacd39c8dd1f55268f44@sha256:cb8b395cb5e933233a45c2f21500bb125fd3e66c617ba4534b7053c68eb85149
+      value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package:8efe12cc3fe2cd0825888ec5a198cc55871320cb@sha256:89d5c491ef5efe3aaebae9182a190a9eeb5352fd6b549d1855ad38c6ca549cf7
   taskRunTemplate:
     serviceAccountName: build-pipeline-calunga-npm-registry-main
   workspaces:
