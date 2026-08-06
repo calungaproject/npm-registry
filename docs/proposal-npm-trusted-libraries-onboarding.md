@@ -538,7 +538,7 @@ PR → calunga-npm-onboarding
 | ----------- | ------------- | ----------- |
 | `…-on-pull-request` | `event == "pull_request" && target_branch == "main"` | Pulp Stage URL; `output-image` optional for OCI skip |
 | `…-on-push` | `event == "push" && target_branch == "main"` | Quay `output-image: …:{{revision}}.npm`; `prev-packages-ref: HEAD^` |
-| **Release** | ReleasePlan on `calunga-npm-onboarding` app snapshot | `ociStorage` configmap → releng pulls Quay artifact |
+| **Release** | ReleasePlan in `konflux-release-data` tenants-config on `calunga-npm-registry-main` | RPA in same repo; releng pulls Quay snapshot artifact |
 
 ### Verification gates
 

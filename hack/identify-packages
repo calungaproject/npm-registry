@@ -1,5 +1,9 @@
 #!/bin/bash
 # Identify npm onboarding packages added or changed since prev-packages-ref.
+#
+# "Changed" means a new packages/<name>/<version>/manifest.json (or name/version
+# fields that differ from prev). In-place edits to an existing name/version are
+# intentionally ignored (no-packages) — see CONTRIBUTING.md.
 set -euo pipefail
 
 PACKAGES_DIR="packages"

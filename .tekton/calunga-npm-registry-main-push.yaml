@@ -7,7 +7,9 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch == "main"
+    pipelinesascode.tekton.dev/on-cel-expression: >
+      event == "push" && target_branch == "main" &&
+      files.all.exists(x, x.matches('^packages/') && !x.matches('(^|/)README(\\.md)?$'))
     # Independent promotes per merge; avoid snapshot supersession skipping releases.
     test.appstudio.openshift.io/ignore-supersession: "true"
   creationTimestamp: null
@@ -34,9 +36,9 @@ spec:
     - name: git-clone-depth
       value: "0"
     - name: builder-image
-      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:6d3502c8cc14874eb808ff9c6e63f4bd9ea37d94@sha256:9de06a22fd40563109fa6c758deb9d3b9f2bd56d173ad860c2d98c501da7d54a
+      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:cb1b686e859923f4122afacd39c8dd1f55268f44@sha256:c053e612ae01be54a8168a0f6c2d0c58e32cc62e7914bf2e1df7afb676f57c4b
     - name: task-promote-npm-oci-bundle
-      value: quay.io/redhat-user-workloads/calunga-tenant/task-promote-npm-oci:a5b3aeae8568be78be3a6f0fe38a29e07c0d2e87@sha256:4bd5f3d309665482c6fb3880b5e40485a2a019d7bdbe390ec2964ad307113356
+      value: quay.io/redhat-user-workloads/calunga-tenant/task-promote-npm-oci:cb1b686e859923f4122afacd39c8dd1f55268f44@sha256:5b1019d7fb2f00274d758a6d29d593e03e3b39eb9532e2a8fd63ca4762e950ca
   taskRunTemplate:
     serviceAccountName: build-pipeline-calunga-npm-registry-main
   workspaces:
