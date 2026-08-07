@@ -22,6 +22,80 @@ Onboarding lives in a **dedicated Calunga git repository** (separate from Python
 
 Human review is required on every onboarding change; AI agents may **draft** PRs but do not sign releases or approve policy gates.
 
+### High-level flow: agents → factory → multi-Pulp publish
+
+Emphasize pipeline **inputs** (three Fullsend agents) and **outputs** (registry families). Factory internals are stage boxes only — no task-level detail.
+
+```mermaid
+flowchart TB
+  subgraph sources [Priority inputs]
+    Jira[Jira<br/>customer requests]
+    PulpGaps[Pulp gaps<br/>missed installs]
+    Community[Community<br/>popular packages]
+    Closure[Dep closure<br/>drive toward L3]
+  end
+
+  Agent1[Agent 1 · Priority<br/>Fullsend · queue ranking]
+  Queue[Priority queue<br/>deterministic + agent hints]
+  Agent2[Agent 2 · Recipe<br/>manifest · entry · smoke]
+  PR[PR → npm-registry<br/>packages/name/version/]
+  Agent3[Agent 3 · Attack gate<br/>flag malicious entry/smoke]
+
+  subgraph factory [Factory stages]
+    OnPr[on-pr<br/>build · smoke · Quay]
+    OnPush[on-push<br/>promote · L1–L3 assess]
+    Release[Release<br/>sign · multi-Pulp publish]
+  end
+
+  subgraph registries [Pulp registry families]
+    RH[Red Hat Pulp<br/>internal app builds]
+    LwCve[Lightwell · Remediated<br/>CVE backports]
+    LwPriv[Lightwell · Private<br/>customer / group repos]
+  end
+
+  Jira --> Agent1
+  PulpGaps --> Agent1
+  Community --> Agent1
+  Closure --> Agent1
+  Agent1 --> Queue
+  Queue --> Agent2
+  Agent2 --> PR
+  PR --> Agent3
+  Agent3 --> OnPr
+  OnPr --> OnPush
+  OnPush --> Release
+  %% Single edge into the subgraph — avoids Mermaid's messy 1→3 fan-out bar
+  Release --> registries
+```
+
+Consumers (RH engineering and Lightwell subscribers) pull from the registry family that matches their access — see the output table below.
+
+#### Input — Fullsend agents
+
+| Agent | Role |
+| ----- | ---- |
+| **1 · Priority queue** | Ranks work from a deterministic base: **Jira** (customer requests), **Pulp** (packages customers need but missed from the registry), **Community** (most popular packages), **Dependency closure** (push toward L3). The agent may propose extra sources; ranking stays explainable. |
+| **2 · Recipe builder** | Dequeues the next package, drafts `manifest.json`, `build.entrypoint.sh`, and `verify.smoke.sh`, and opens a PR to `npm-registry` under `packages/<name>/<version>/`. Humans still approve; AI does not sign or publish. |
+| **3 · Attack gate** | Reviews entrypoint, smoke, and what they invoke for malicious intent **before** on-pr is allowed to run. Fail or flag blocks the factory build until cleared. |
+
+#### Factory — stages only
+
+| Stage | What it does (high level) |
+| ----- | ------------------------- |
+| **on-pr** | Build from git source · smoke · Quay on-pr artifact |
+| **on-push** | Promote snapshot · assess L1–L3 · compliance sidecars |
+| **Release** | Attest · publish `.tgz` + compliance to target Pulp(s) |
+
+Input to the factory: an approved recipe PR. Output of the factory: signed packages + compliance records ready for multi-registry publish.
+
+#### Output — Pulp registry families
+
+| Registry | Audience | Notes |
+| -------- | -------- | ----- |
+| **Red Hat Pulp** | Internal | Shared npm index for Red Hat teams building applications — enterprise-wide consumption of TL-built packages. |
+| **Lightwell · Remediated** | Paid Lightwell subscription | Packages with CVE fixes applied by TL — including **backports** to customer-pinned versions, not only latest community releases. |
+| **Lightwell · Private** | Paid Lightwell subscription | Private repositories for a specific customer or customer group — curated / exclusive package sets. |
+
 ---
 
 ## Background
