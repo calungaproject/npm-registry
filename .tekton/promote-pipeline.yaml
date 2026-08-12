@@ -9,7 +9,7 @@ spec:
   description: |
     npm Trusted Libraries — on-push promote pipeline.
     Identifies packages from the merge (HEAD^), promotes the matching
-    on-pr-<sha>.npm Quay OCI artifact to a durable :<sha>.npm snapshot
+    on-pr-<pr-number>.npm Quay OCI artifact to a durable :<sha>.npm snapshot
     (verify SPDX SBOM + assess compliance). No rebuild.
   params:
     - name: git-url
@@ -22,8 +22,8 @@ spec:
       type: string
     - name: source-npm-image
       description: >-
-        PR OCI artifact to promote (…:on-pr-<sha>.npm). Must exist from a green
-        PR build for the same commit SHA.
+        PR OCI artifact to promote (…:on-pr-<pr-number>.npm). Must exist from a
+        green on-pr build for the merged pull request.
       type: string
     - name: image-expires-after
       description: Empty for durable snapshot tags
