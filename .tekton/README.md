@@ -9,7 +9,9 @@ init → clone-repository → lint-manifests → identify-packages → build-npm
 ```
 
 Built tarballs are pushed as an OCI artifact to
-`$(output-image).npm` (e.g. `.../calunga-npm-registry-main:on-pr-<sha>.npm`, 5d TTL).
+`$(output-image).npm` (e.g. `.../calunga-npm-registry-main:on-pr-<pr-number>.npm`, 5d TTL).
+Ephemeral tags use the **pull request number** (`on-pr-{{pull_request_number}}`), not commit
+SHA, so squash/rebase merges still match the on-push promote source.
 Pipeline `IMAGE_URL` / `IMAGE_DIGEST` come from the trusted **`build-npm-package`**
 task (same pattern as Python `build-wheels`).
 
@@ -30,8 +32,9 @@ add a new version directory instead (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 init → clone-repository → identify-packages → promote-npm-oci
 ```
 
-On merge to `main`, promotes the matching **`on-pr-<sha>.npm`** artifact to a durable
-`:<sha>.npm` snapshot (SBOM verify + compliance sidecars). **No rebuild.**
+On merge to `main`, promotes the matching **`on-pr-<pr-number>.npm`** artifact to a durable
+`:<merge-sha>.npm` snapshot (SBOM verify + compliance sidecars). **No rebuild.**
+Package merges must go through a GitHub PR so PAC can set `{{pull_request_number}}` on push.
 
 `calunga-npm-registry-main-push.yaml` triggers on push to `main` **only when at
 least one non-README file under `packages/` changes** (same CEL as PR). Infra-only
@@ -40,16 +43,13 @@ auto-release.
 
 | Param | Value |
 | ----- | ----- |
-| `output-image` | `…/calunga-npm-registry-main:{{revision}}` → OCI `….npm` |
-| `source-npm-image` | `…/calunga-npm-registry-main:on-pr-{{revision}}.npm` |
+| `output-image` | `…/calunga-npm-registry-main:{{revision}}` → durable OCI `….npm` (merge SHA) |
+| `source-npm-image` | `…/calunga-npm-registry-main:on-pr-{{pull_request_number}}.npm` |
 | `prev-packages-ref` | `HEAD^` |
 
 Promote **fails** if `PACKAGES_STATUS` is not `has-packages`, if the on-pr
-OCI is missing, or if the pulled artifact has no `.tgz` files. Note: GitHub
-merge/squash commits usually have a **different SHA** than the PR head that
-built `on-pr-<sha>.npm`, so package promotions need a matching strategy (same
-commit on main as the PR build, or resolve the PR artifact by digest / PR
-metadata).
+OCI is missing (no green PR build for that PR number), or if the pulled artifact
+has no `.tgz` files.
 
 ## Bootstrap checklist
 

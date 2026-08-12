@@ -4,6 +4,7 @@ metadata:
   annotations:
     build.appstudio.openshift.io/repo: https://github.com/calungaproject/npm-registry?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
@@ -30,7 +31,7 @@ spec:
     - name: output-image
       value: quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-registry-main:{{revision}}
     - name: source-npm-image
-      value: quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-registry-main:on-pr-{{revision}}.npm
+      value: quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-registry-main:on-pr-{{pull_request_number}}.npm
     - name: prev-packages-ref
       value: 'HEAD^'
     - name: git-clone-depth
