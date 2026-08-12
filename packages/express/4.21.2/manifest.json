@@ -1,0 +1,24 @@
+{
+  "name": "express",
+  "version": "4.21.2",
+  "description": "Fast, unopinionated, minimalist web framework",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/expressjs/express.git",
+    "ref": "4.21.2",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "4.21.2"
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/express-4.21.2.tgz",
+      "pulp_name": "express"
+    }
+  ]
+}
