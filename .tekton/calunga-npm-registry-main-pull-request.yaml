@@ -30,8 +30,9 @@ spec:
       value: quay.io/redhat-user-workloads/calunga-tenant/calunga-npm-registry-main:on-pr-{{pull_request_number}}
     - name: image-expires-after
       value: 5d
+    # Fork PR clones may not have origin/main; use the PR merge-base SHA from GitHub.
     - name: prev-packages-ref
-      value: 'origin/{{target_branch}}'
+      value: '{{ body.pull_request.base.sha }}'
     - name: git-clone-depth
       value: "0"
     - name: builder-image

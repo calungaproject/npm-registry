@@ -11,7 +11,18 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
-mapfile -t MANIFESTS < <(git diff --name-only --diff-filter=AM "${PREV_REF}" -- 'packages/' | grep '/manifest\.json$' || true)
+set +e
+diff_output="$(git diff --name-only --diff-filter=AM "${PREV_REF}" -- 'packages/')"
+err="$?"
+set -e
+
+if [[ $err -ne 0 ]]; then
+    echo "[lint-manifest] git diff failed (ref ${PREV_REF}), linting all manifests under packages/" >&2
+    mapfile -t MANIFESTS < <(find packages -name manifest.json -type f 2>/dev/null | sort)
+else
+    mapfile -t MANIFESTS < <(printf '%s\n' "${diff_output}" | grep '/manifest\.json$' || true)
+fi
+
 if [[ ${#MANIFESTS[@]} -eq 0 ]]; then
     echo "[lint-manifest] no changed manifests under packages/"
     exit 0
