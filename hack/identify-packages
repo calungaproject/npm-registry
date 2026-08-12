@@ -26,13 +26,15 @@ manifest_dir_from_path() {
 }
 
 set +e
-CHANGED_MANIFESTS="$(git diff --name-only --diff-filter=AM "${REVISION}" -- "${PACKAGES_DIR}/" | grep '/manifest\.json$' || true)"
+diff_output="$(git diff --name-only --diff-filter=AM "${REVISION}" -- "${PACKAGES_DIR}/")"
 err="$?"
 set -e
 
 if [[ $err -ne 0 ]]; then
-    echo "[identify-packages] git diff failed, assuming all manifests are new" >&2
+    echo "[identify-packages] git diff failed (ref ${REVISION}), assuming all manifests are new" >&2
     CHANGED_MANIFESTS="$(find "${PACKAGES_DIR}" -name manifest.json -type f 2>/dev/null || true)"
+else
+    CHANGED_MANIFESTS="$(printf '%s\n' "${diff_output}" | grep '/manifest\.json$' || true)"
 fi
 
 NEW_PACKAGES=""
@@ -64,7 +66,7 @@ echo "${NEW_PACKAGES}"
 
 NEW_PACKAGES_JSON='[]'
 if [[ -n "${NEW_PACKAGES}" ]]; then
-    NEW_PACKAGES_JSON="$(printf '%s\n' "${NEW_PACKAGES}" | sed -e ':a;N;$!ba;s/\n/", "/g' | sed -e 's/^/\["/' -e 's/$/"\]/')"
+    NEW_PACKAGES_JSON="$(printf '%s\n' "${NEW_PACKAGES}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 fi
 
 echo "${NEW_PACKAGES_JSON}" | tee "${RESULT_FILE}"

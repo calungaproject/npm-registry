@@ -155,6 +155,10 @@ spec:
       runAfter:
         - lint-manifests
         - identify-packages
+      when:
+        - input: "$(tasks.identify-packages.results.SCRIPT_OUTPUT)"
+          operator: in
+          values: ["has-packages"]
       params:
         - name: PACKAGES
           value: $(tasks.identify-packages.results.SCRIPT_OUTPUT_ARRAY)

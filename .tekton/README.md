@@ -21,7 +21,9 @@ at least one non-README file under `packages/` changes** (PAC CEL on `files.all`
 **not** start a build. Docs / `.tekton` / other infra-only PRs also do not.
 
 `hack/identify-packages` then selects **new** `packages/<name>/<version>/` dirs (or
-manifests whose `name`/`version` fields changed vs `prev-packages-ref`). In-place
+manifests whose `name`/`version` fields changed vs `prev-packages-ref`). On PR,
+`prev-packages-ref` is the GitHub merge-base SHA (`body.pull_request.base.sha`) because
+fork clones often lack `origin/main`. In-place
 edits to an already-merged recipe are unsupported: the PipelineRun may still start,
 but identify returns `no-packages` and the build/promote fails. Contributors should
 add a new version directory instead (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
