@@ -57,18 +57,6 @@
     "optional_dependencies_published": {
       "type": "array",
       "items": { "type": "string" }
-    },
-    "requires_tl_packages": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["name", "version"],
-        "properties": {
-          "name": { "type": "string" },
-          "version": { "type": "string" }
-        },
-        "additionalProperties": true
-      }
     }
   },
   "additionalProperties": true
