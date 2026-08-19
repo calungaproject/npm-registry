@@ -241,16 +241,13 @@ Machine-readable metadata for CI and review.
   ],
   "optional_dependencies_published": [
     "@calunga/esbuild-linux-x64@0.28.0"
-  ],
-  "requires_tl_packages": [
-    { "name": "lodash", "version": "4.17.21" }
   ]
 }
 ```
 
 Do **not** author `compliance_level` or `closure_gaps` in the onboarding manifest. The pipeline **computes** them on **on-push** after querying the TL registry and writes them as **sidecars** (not inside consumer packages). See [Where compliance metadata is stored](#where-compliance-metadata-is-stored).
 
-Fields are illustrative; JSON Schema to be added in the onboarding repo.
+Fields are illustrative; JSON Schema lives in `docs/manifest.schema.json`.
 
 
 | Field                             | Purpose                                                      |
@@ -262,7 +259,9 @@ Fields are illustrative; JSON Schema to be added in the onboarding repo.
 | `entrypoint` / `smoke`            | Filenames in same directory                                  |
 | `outputs`                         | All tarballs this manifest produces in one build (main + platform) |
 | `optional_dependencies_published` | Platform packages wired from main package (Tier B/C)           |
-| `requires_tl_packages`            | **Author input** — prod deps (and platform packages for Tier B deps) used to **compute** L1/L2/L3; AI may draft, human confirms |
+
+
+Do **not** list production dependencies in the manifest. On-push assess reads `dependencies` from the **packed** `package.json` (what consumers install) and queries the TL packument, including semver ranges.
 
 
 ### `build.entrypoint.sh`
@@ -329,15 +328,17 @@ Compliance describes **where production dependencies may resolve at `npm install
 | Level | Name | Production dependencies at install | Typical use |
 | ----- | ---- | ------------------------------------ | ------------- |
 | **L1** | `partial-closure` | **Mixed** — any prod dep not yet on TL may resolve from **upstream npm registry** | Early onboarding; leaves first |
-| **L2** | `direct-closure` | **Direct** prod `dependencies` + required **TL platform packages** for those deps (pinned versions) must be on TL; transitive deps may still use npmjs | Most packages before full tree exists |
+| **L2** | `direct-closure` | **Direct** prod `dependencies` (a TL version matching the packed range) must be on TL; this package’s own TL platform optional is satisfied by the same recipe; transitive deps may still use npmjs | Most packages before full tree exists |
 | **L3** | `full-closure` | **Entire production lockfile closure** for this package resolves **only** from TL registry (linux-x64 v1); **no npmjs** for prod tree | Target for production apps; “highest” compliance |
 
 **Computing the level (on-push pipeline):**
 
-1. Manifest lists `requires_tl_packages` (direct prod deps + platform packages for Tier B/C — AI may draft, human confirms).
-2. On **push to main**, promote pipeline queries TL registry (Prod, and Stage if present) for each pinned `name@version`.
-3. Write `compliance_level`, `closure_gaps`, and **`assessed_at`** (UTC) into **sidecar** JSON files next to the package tarballs in the Quay OCI snapshot — **not** inside the `.tgz` consumers install.
+1. Open the **main** `.tgz` (`outputs` type `npm-package`) and read packed `package.json` **`dependencies`** (not `devDependencies` or `peerDependencies`). `optionalDependencies` already in this snapshot (typically `@calunga/…-linux-x64` from the same recipe) are treated as satisfied; other optionals are ignored for v1.
+2. On **push to main**, promote pipeline queries the TL javascript registry packument for each name + version **or range** (highest matching TL version).
+3. Write `compliance_level`, `closure_gaps`, `direct_dependencies`, and **`assessed_at`** (UTC) into **sidecar** JSON files next to the package tarballs in the Quay OCI snapshot — **not** inside the `.tgz` consumers install.
 4. Release copies those sidecars into Pulp as **adjacent, queryable** compliance records (labels and/or companion content). Optional: same fields in the **attestation predicate** at release.
+
+**v1 computation vs table names:** the pipeline assigns **L3** when there are **no packed `dependencies`**, or every **direct** dep resolves on TL and is itself labeled L3. That is **not** full lockfile closure. True L3 in the table above remains the later lockfile tightening (see `docs/prod_followup.md` Assess quality).
 
 **Why not inside the package?** Compliance is a **Trusted Libraries KPI / catalog property**, not part of the upstream library API. End users installing from Pulp should get a clean tarball (source-built bits + SBOM). Operators and dashboards query Pulp (or the OCI snapshot) for level without unpacking `.tgz` files.
 
@@ -350,7 +351,7 @@ Compliance describes **where production dependencies may resolve at `npm install
 
 **Re-publish same semver** only for **recipe/security fixes** (bad build, wrong ref, CVE rebuild policy) — not to refresh compliance labels. That is a separate org policy from closure level.
 
-**Incremental growth:** onboard leaves first (often **L3** at first publish). Parents onboarded early may publish at **L1/L2**; later upstream releases benefit from a fuller TL registry. AI prioritizes onboarding deps that block many `requires_tl_packages` lists in pending manifests.
+**Incremental growth:** onboard leaves first (often **L3** at first publish — no packed `dependencies`). Parents onboarded early may publish at **L1/L2**; later upstream releases benefit from a fuller TL registry. AI prioritizes onboarding deps that appear in packed `dependencies` of pending recipes.
 
 **Install behavior by level:**
 
@@ -366,14 +367,14 @@ Compliance is a **TL catalog / KPI record**, kept **outside** the consumer-insta
 
 | Location | File / field | Who writes | When | Audience |
 | -------- | ------------ | ---------- | ---- | -------- |
-| **Onboarding repo** | `manifest.json` → `requires_tl_packages` only | Human / AI in PR | Authoring | CI **input** for closure computation |
+| **Onboarding repo** | `manifest.json` (identity, source, outputs) — **not** a dep pin list | Human / AI in PR | Authoring | Recipe; CI groups outputs / `built_from` |
 | **Quay OCI snapshot** (`:<merge-sha>.npm`) | Sidecar next to each `.tgz` (see naming below) | **on-push** promote pipeline | After merge | Release input; audit |
 | **Pulp Prod** | Adjacent compliance object + content labels on the package unit | **Release** pipeline | Publish | **Operators / dashboards** — query by `name@version` **without** unpacking the tarball |
 | **Attestation predicate** (optional) | `compliance_level`, `closure_gaps`, `assessed_at` | **Release** (with sign) | Release | Sigstore / EC verification |
 
 **Not stored in:** the published main or platform `.tgz` (no `tl-compliance.json` / compliance fields inside `package/` for end users).
 
-**Authoring rule:** `manifest.json` declares **what to check** (`requires_tl_packages`). **on-push CI declares the result** as sidecars; release mirrors that into Pulp for query.
+**Authoring rule:** do **not** declare a parallel dep list in `manifest.json`. **on-push CI** reads packed `package.json` `dependencies`, queries TL, and writes the result as sidecars; release mirrors that into Pulp for query.
 
 ### OCI sidecar naming (on-push snapshot)
 
@@ -397,12 +398,9 @@ Platform packages share the **same** `compliance_level` / `closure_gaps` as the 
   "version": "5.4.0",
   "compliance_level": "L2",
   "assessed_at": "2026-05-20T14:32:00Z",
-  "closure_gaps": [
-    { "name": "esbuild", "version": "0.28.0", "reason": "not_on_tl_registry" }
-  ],
-  "requires_tl_packages": [
-    { "name": "esbuild", "version": "0.28.0" },
-    { "name": "@calunga/esbuild-linux-x64", "version": "0.28.0" }
+  "closure_gaps": [],
+  "direct_dependencies": [
+    { "name": "rollup", "requested": "^4.0.0", "version": "4.22.0", "compliance_level": "L2" }
   ],
   "built_from": {
     "url": "https://github.com/vitejs/vite.git",
@@ -558,7 +556,7 @@ PR → calunga-npm-onboarding
 ▼ on-pr (PipelineRun: pull_request → main)
 ├─ Static gate (fail PR)
 │    ├─ lint: manifest schema, script shellcheck, no secrets
-│    └─ policy: tier vs outputs[]; builder image pin; requires_tl_packages present
+│    └─ policy: tier vs outputs[]; builder image pin
 │
 ▼ Konflux build pipeline (same task graph as Python build-wheels pattern)
 ├─ identify changed packages/<name>/<version>/ (path filter or git diff vs origin/main)
@@ -576,7 +574,7 @@ PR → calunga-npm-onboarding
 ├─ identify packages promoted by this merge (prev ref HEAD^)
 ├─ resolve on-pr-<merge-sha>.npm (or agreed policy); verify SBOM-in-tarball
 ├─ compute compliance_level (L1–L3) + closure_gaps + assessed_at
-│    (query TL Prod [+ Stage] for requires_tl_packages)
+│    (query TL Prod packument for packed package.json dependencies; ranges allowed)
 ├─ write *.tl-compliance.json sidecars next to each .tgz
 └─ oras push → Quay durable snapshot
      e.g. quay.io/.../calunga-npm-onboarding:<merge-sha>.npm
@@ -603,7 +601,7 @@ PR → calunga-npm-onboarding
 
 **Alignment with Python:** Python **on-push** builds wheels and pushes **directly to Quay** (no Pulp Stage). npm PoC similarly uses Quay for transport; Stage is optional. **Compliance assess runs on-push** (when the durable snapshot is formed), not inside consumer packages.
 
-**Compliance:** Level is computed on **on-push** (query TL registry for `requires_tl_packages` at `assessed_at`), stored as OCI sidecars, then mirrored to Pulp at release. Later onboarding of deps does **not** republish the same semver to bump level ([point-in-time assertion](#dependency-closure-compliance-l1-l2-l3)).
+**Compliance:** Level is computed on **on-push** (query TL registry for packed `dependencies` at `assessed_at`), stored as OCI sidecars, then mirrored to Pulp at release. Later onboarding of deps does **not** republish the same semver to bump level ([point-in-time assertion](#dependency-closure-compliance-l1-l2-l3)). Direct deps only for v1; full lockfile closure is a later tightening.
 **PR vs merge commit:** Stage publish uses **PR head** revision. Merge promotion assumes the **merged PR** built successfully on that head (or final push to PR branch). If `main` moves without a fresh PR build, policy should require a green `on-pr` on the merge commit or re-trigger build — open operational detail.
 
 ### Triggers (Pipelines-as-Code)

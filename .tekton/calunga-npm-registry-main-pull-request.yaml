@@ -36,7 +36,7 @@ spec:
     - name: git-clone-depth
       value: "0"
     - name: builder-image
-      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:a263cdf77f404e9df3f49815eaa294e44be17de8@sha256:c3511cd1e8cd4f1845be52ebe1e938e9e08d2fc802036793b1afae4fec82c834
+      value: quay.io/redhat-user-workloads/calunga-tenant/npm-builder:98f9a71e1d1590ff0356eec9b4c7f61454b86e24@sha256:427e9952ae18cd2182a8f61246d8c78aef1c72d53ec753305c77b39f644547f2
     - name: task-build-npm-package-bundle
       value: quay.io/redhat-user-workloads/calunga-tenant/task-build-npm-package:8efe12cc3fe2cd0825888ec5a198cc55871320cb@sha256:89d5c491ef5efe3aaebae9182a190a9eeb5352fd6b549d1855ad38c6ca549cf7
   taskRunTemplate:
