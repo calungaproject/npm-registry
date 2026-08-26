@@ -1,0 +1,24 @@
+{
+  "name": "lodash",
+  "version": "4.18.1",
+  "description": "Lodash modular utilities",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/lodash/lodash.git",
+    "ref": "4.18.1",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "4.18.1"
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/lodash-4.18.1.tgz",
+      "pulp_name": "lodash"
+    }
+  ]
+}
