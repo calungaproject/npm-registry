@@ -245,7 +245,7 @@ Machine-readable metadata for CI and review.
 }
 ```
 
-Do **not** author `compliance_level` or `closure_gaps` in the onboarding manifest. The pipeline **computes** them on **on-push** after querying the TL registry and writes them as **sidecars** (not inside consumer packages). See [Where compliance metadata is stored](#where-compliance-metadata-is-stored).
+Do **not** author `compliance_level`, `missing_gaps`, or `pending_l3_gaps` in the onboarding manifest. The pipeline **computes** them on **on-push** after querying the TL registry and writes them as **sidecars** (not inside consumer packages). See [Where compliance metadata is stored](#where-compliance-metadata-is-stored).
 
 Fields are illustrative; JSON Schema lives in `docs/manifest.schema.json`.
 
@@ -335,23 +335,32 @@ Compliance describes **where production dependencies may resolve at `npm install
 
 1. Open the **main** `.tgz` (`outputs` type `npm-package`) and read packed `package.json` **`dependencies`** (not `devDependencies` or `peerDependencies`). `optionalDependencies` already in this snapshot (typically `@calunga/…-linux-x64` from the same recipe) are treated as satisfied; other optionals are ignored for v1.
 2. On **push to main**, promote pipeline queries the TL javascript registry packument for each name + version **or range** (highest matching TL version).
-3. Write `compliance_level`, `closure_gaps`, `direct_dependencies`, and **`assessed_at`** (UTC) into **sidecar** JSON files next to the package tarballs in the Quay OCI snapshot — **not** inside the `.tgz` consumers install.
-4. Release copies those sidecars into Pulp as **adjacent, queryable** compliance records (labels and/or companion content). Optional: same fields in the **attestation predicate** at release.
+3. Write **`schema_version` 3** sidecars: `compliance_level`, immutable `direct_dependencies` (`[{name, requested}]` only), **`missing_gaps`** (deps not on TL), **`pending_l3_gaps`** (deps on TL but not L3), **`assessed_at`**, and **`compliance_revision: 1`** — next to each tarball in the Quay OCI snapshot, **not** inside the `.tgz` consumers install.
+4. **Release** copies sidecars to per-package compliance OCI + Pulp labels, runs **`update-npm-closure update`** (closure waiter refresh + global index), and optionally mirrors fields in the attestation predicate.
 
-**v1 computation vs table names:** the pipeline assigns **L3** when there are **no packed `dependencies`**, or every **direct** dep resolves on TL and is itself labeled L3. That is **not** full lockfile closure. True L3 in the table above remains the later lockfile tightening (see `docs/prod_followup.md` Assess quality).
+**Level rules (schema v3):**
 
-**Why not inside the package?** Compliance is a **Trusted Libraries KPI / catalog property**, not part of the upstream library API. End users installing from Pulp should get a clean tarball (source-built bits + SBOM). Operators and dashboards query Pulp (or the OCI snapshot) for level without unpacking `.tgz` files.
+| Level | Sidecar condition |
+| ----- | ----------------- |
+| **L1** | `missing_gaps` non-empty |
+| **L2** | `missing_gaps` empty and `pending_l3_gaps` non-empty |
+| **L3** | both gap lists empty |
 
-**Point-in-time assertion (no compliance republish):**
+**v1 computation vs table names:** assess uses **direct** packed `dependencies` only — not full lockfile closure. True full-lockfile L3 in the table above remains a later tightening (see `docs/prod_followup.md` Assess quality).
 
-- TL publishes **`name@version` matching upstream semver only** (e.g. `vite@5.4.0`). No TL-specific suffixes (`5.4.0+tl.1`) to “bump” compliance.
-- **`compliance_level` is fixed for that publish** — a snapshot of the registry **at on-push assess time**. It is stored beside the artifact and **does not change** when dependencies are onboarded later.
-- Onboarding **`esbuild@0.28.0` later does not upgrade `vite@5.4.0` from L2 to L3** on the registry. `vite@5.4.0` remains L2 as published; operators read that from the Pulp compliance record / OCI sidecar.
-- **Higher compliance comes from new upstream versions:** when `vite@5.5.0` is onboarded and the closure is fuller, that **new** `name@version` may ship as L3. Over time, **most actively maintained versions** are onboarded when the tree is mature → **most new publishes are L3**; older pins may stay L1/L2 historically.
+**Why not inside the package?** Compliance is a **Trusted Libraries KPI / catalog property**, not part of the upstream library API. End users installing from Pulp should get a clean tarball (source-built bits + SBOM). Operators and dashboards query Pulp (or compliance OCI) for level without unpacking `.tgz` files.
 
-**Re-publish same semver** only for **recipe/security fixes** (bad build, wrong ref, CVE rebuild policy) — not to refresh compliance labels. That is a separate org policy from closure level.
+**Assess vs release closure updates:**
 
-**Incremental growth:** onboard leaves first (often **L3** at first publish — no packed `dependencies`). Parents onboarded early may publish at **L1/L2**; later upstream releases benefit from a fuller TL registry. AI prioritizes onboarding deps that appear in packed `dependencies` of pending recipes.
+- TL publishes **`name@version` matching upstream semver only** (e.g. `vite@5.4.0`). No TL-specific suffixes (`5.4.0+tl.1`).
+- **On-push assess** writes the **initial** compliance record (level + gap lists + immutable deps).
+- **Release closure updater** (`update-npm-closure` in plumbing-utils) may **mutate only** `missing_gaps`, `pending_l3_gaps`, `compliance_level`, `closure_updated_at`, and `compliance_revision` on **waiter** packages when a blocker lands or reaches L3 — without republishing the blocker’s tarball.
+- Example: when `esbuild@0.28.0` reaches L3, packages that listed it in `pending_l3_gaps` can move **L2 → L3**; their compliance OCI and Pulp `tl.compliance_level` label are updated in place.
+- **`direct_dependencies` is immutable** after assess (manifest intent only); full dependency detail remains in the published package / lockfile.
+
+**Re-publish same semver** only for **recipe/security fixes** (bad build, wrong ref, CVE rebuild policy) — not as a substitute for closure propagation (that is the closure updater’s job).
+
+**Incremental growth:** onboard leaves first (often **L3** at first publish — no packed `dependencies`). Parents onboarded early may publish at **L1/L2**; the **global closure index** records which packages wait on each blocker so landing a dep refreshes waiters without scanning the whole catalog. AI prioritizes onboarding deps that appear in packed `dependencies` of pending recipes.
 
 **Install behavior by level:**
 
@@ -369,12 +378,16 @@ Compliance is a **TL catalog / KPI record**, kept **outside** the consumer-insta
 | -------- | ------------ | ---------- | ---- | -------- |
 | **Onboarding repo** | `manifest.json` (identity, source, outputs) — **not** a dep pin list | Human / AI in PR | Authoring | Recipe; CI groups outputs / `built_from` |
 | **Quay OCI snapshot** (`:<merge-sha>.npm`) | Sidecar next to each `.tgz` (see naming below) | **on-push** promote pipeline | After merge | Release input; audit |
-| **Pulp Prod** | Adjacent compliance object + content labels on the package unit | **Release** pipeline | Publish | **Operators / dashboards** — query by `name@version` **without** unpacking the tarball |
-| **Attestation predicate** (optional) | `compliance_level`, `closure_gaps`, `assessed_at` | **Release** (with sign) | Release | Sigstore / EC verification |
+| **Quay OCI (per package)** | `COMPLIANCE_IMAGE_PREFIX:<name-version>` — full `*.tl-compliance.json` | **Release** closure step | Publish / closure update | Authoritative compliance doc; CAS via `compliance_revision` |
+| **Quay OCI (global)** | `npm-closure-index.json` at `CLOSURE_INDEX_IMAGE` | **Release** closure step | Publish / rebalance | Reverse gap index (blocker → waiters); CAS via `revision` |
+| **Pulp Prod** | Content labels on npm package unit | **Release** pipeline | Publish / closure update | **Operators** — `tl.compliance_level`, `tl.compliance_oci_digest` only (no index digest on Pulp) |
+| **Attestation predicate** (optional) | `compliance_level`, gap summary, `assessed_at` | **Release** (with sign) | Release | Sigstore / EC verification |
 
 **Not stored in:** the published main or platform `.tgz` (no `tl-compliance.json` / compliance fields inside `package/` for end users).
 
-**Authoring rule:** do **not** declare a parallel dep list in `manifest.json`. **on-push CI** reads packed `package.json` `dependencies`, queries TL, and writes the result as sidecars; release mirrors that into Pulp for query.
+**Authoring rule:** do **not** declare a parallel dep list in `manifest.json`. **on-push CI** reads packed `package.json` `dependencies`, queries TL, and writes schema v3 sidecars; **release** publishes compliance OCI, runs closure update, and sets Pulp labels.
+
+Canonical field reference: [`docs/tl-compliance-schema-v3.md`](tl-compliance-schema-v3.md).
 
 ### OCI sidecar naming (on-push snapshot)
 
@@ -388,39 +401,61 @@ vite-5.4.0.tl-compliance.json
 … (SBOMs remain embedded inside each .tgz under package/sboms/redhat.spdx.json)
 ```
 
-Platform packages share the **same** `compliance_level` / `closure_gaps` as the sibling main package from the same recipe (one manifest → one compliance story), and may add binary identity fields.
+Platform packages share the **same** `compliance_level` / gap lists as the sibling main package from the same recipe (one manifest → one compliance story), and may add binary identity fields.
 
-**`*.tl-compliance.json`** shape:
+**`*.tl-compliance.json`** shape (schema v3 — see [`tl-compliance-schema-v3.md`](tl-compliance-schema-v3.md)):
 
 ```json
 {
+  "schema_version": 3,
   "name": "vite",
   "version": "5.4.0",
   "compliance_level": "L2",
   "assessed_at": "2026-05-20T14:32:00Z",
-  "closure_gaps": [],
+  "compliance_revision": 1,
   "direct_dependencies": [
-    { "name": "rollup", "requested": "^4.0.0", "version": "4.22.0", "compliance_level": "L2" }
+    { "name": "rollup", "requested": "^4.0.0" }
   ],
+  "missing_gaps": [],
+  "pending_l3_gaps": ["rollup@4.22.0"],
   "built_from": {
     "url": "https://github.com/vitejs/vite.git",
     "ref": "v5.4.0"
   },
   "tarball": "vite-5.4.0.tgz",
-  "tarball_sha256": "…",
-  "manifest_entrypoint_digest": "sha256:…"
+  "tarball_sha256": "…"
 }
 ```
+
+Gap entries are **`name@version` strings** (resolved pin at assess time). They must correspond to a name in `direct_dependencies`. The closure updater mutates gap lists and level only — never `direct_dependencies`.
+
+**Global closure index** (`npm-closure-index.json`, separate OCI artifact):
+
+```json
+{
+  "schema_version": 1,
+  "revision": 42,
+  "updated_at": "2026-05-20T15:00:00Z",
+  "entries": {
+    "rollup@4.22.0": { "parents": ["vite@5.4.0"] }
+  }
+}
+```
+
+Each release registers the package as a **parent** on every blocker in its gap lists. When a blocker lands or reaches L3, the closure updater refreshes indexed waiters and removes the blocker entry.
 
 Platform sidecar example (same level, plus layout):
 
 ```json
 {
+  "schema_version": 3,
   "name": "@calunga/esbuild-linux-x64",
   "version": "0.28.0",
   "compliance_level": "L3",
   "assessed_at": "2026-05-20T14:32:00Z",
-  "closure_gaps": [],
+  "compliance_revision": 1,
+  "missing_gaps": [],
+  "pending_l3_gaps": [],
   "platform": { "os": "linux", "cpu": "x64", "libc": "glibc" },
   "tarball": "@calunga/esbuild-linux-x64-0.28.0.tgz",
   "tarball_sha256": "…",
@@ -433,10 +468,11 @@ Platform sidecar example (same level, plus layout):
 Release **does not** stuff compliance into the npm tarball. It:
 
 1. Publishes each `.tgz` to the npm repository (consumer install path stays clean).
-2. Uploads each `*.tl-compliance.json` as an **adjacent** Pulp artifact (companion content or a small TL “compliance” repository), keyed by `name` + `version`.
-3. Sets **Pulp content labels / attributes** on the package unit, e.g. `tl.compliance_level=L2`, `tl.assessed_at=…`, so a simple Pulp API filter answers “what is the level for `vite@5.4.0`?” without downloading or extracting the package.
+2. Pushes each `*.tl-compliance.json` to **per-package compliance OCI** and sets Pulp labels `tl.compliance_level`, `tl.compliance_oci_digest`.
+3. Runs **`update-npm-closure update`** (refresh waiters, register on global index) and maintains **`npm-closure-index.json`** OCI.
+4. Operators query level via Pulp labels or pull compliance OCI — without unpacking the package.
 
-Exact Pulp content type (labels-only vs file companion) is an implementation detail; the contract is: **one queryable record per `name@version` next to the package, not inside it.**
+Repair / drift: **`update-npm-closure rebalance`** (plumbing-utils; full or `--index-only`). Assess stays in **npm-builder**; closure update and rebalance stay in **plumbing-utils** (Pulp credentials).
 
 ---
 
@@ -529,7 +565,7 @@ The **platform package** uses a **new** minimal `package.json` (binary layout on
 2. **Publish with install scripts stripped** — only if optional deps are always resolved from Pulp and org policy allows `npm install --ignore-scripts` for edge cases.
 3. **Broad `scripts` rewrites** — avoid unless necessary; increases review burden and drift from upstream.
 
-Default: **(1)**. No silent fallback to npmjs for **this package’s** `@calunga/*` platform optional. At **L1**, other dependencies may still use npmjs — document gaps in the **compliance sidecar** / Pulp record (`closure_gaps`).
+Default: **(1)**. No silent fallback to npmjs for **this package’s** `@calunga/*` platform optional. At **L1**, other dependencies may still use npmjs — document gaps in **`missing_gaps`** on the compliance sidecar / Pulp label.
 
 #### PR review checklist (scripts)
 
@@ -573,9 +609,9 @@ PR → calunga-npm-onboarding
 ▼ on-push (PipelineRun: push → main)  — promote + compliance assess
 ├─ identify packages promoted by this merge (prev ref HEAD^)
 ├─ resolve on-pr-<merge-sha>.npm (or agreed policy); verify SBOM-in-tarball
-├─ compute compliance_level (L1–L3) + closure_gaps + assessed_at
+├─ compute compliance_level (L1–L3) + missing_gaps + pending_l3_gaps + direct_dependencies + assessed_at
 │    (query TL Prod packument for packed package.json dependencies; ranges allowed)
-├─ write *.tl-compliance.json sidecars next to each .tgz
+├─ write *.tl-compliance.json sidecars (schema v3) next to each .tgz
 └─ oras push → Quay durable snapshot
      e.g. quay.io/.../calunga-npm-onboarding:<merge-sha>.npm
      contents: *.tgz (+ embedded sboms) + *.tl-compliance.json
@@ -584,11 +620,12 @@ PR → calunga-npm-onboarding
 ├─ oras pull Quay snapshot
 ├─ cosign attest each .tgz (release SA / KMS; optional compliance fields in predicate)
 ├─ npm publish each .tgz → Pulp Prod  (consumer packages stay clean)
-└─ publish compliance: upload *.tl-compliance.json as adjacent Pulp records
-     + set content labels (tl.compliance_level, …) for query without unpack
+├─ publish compliance OCI per package + set Pulp labels (tl.compliance_level, tl.compliance_oci_digest)
+└─ update-npm-closure update (+ global npm-closure-index.json OCI)
+     refresh waiters when blockers land; register release on gap index
 │
 ▼ consumers: npm install --registry <TL Pulp Prod>
-▼ operators: Pulp API / labels → compliance_level for name@version
+▼ operators: Pulp labels / compliance OCI → compliance_level for name@version
 ```
 ### Stage vs prod (review notes)
 
@@ -601,7 +638,7 @@ PR → calunga-npm-onboarding
 
 **Alignment with Python:** Python **on-push** builds wheels and pushes **directly to Quay** (no Pulp Stage). npm PoC similarly uses Quay for transport; Stage is optional. **Compliance assess runs on-push** (when the durable snapshot is formed), not inside consumer packages.
 
-**Compliance:** Level is computed on **on-push** (query TL registry for packed `dependencies` at `assessed_at`), stored as OCI sidecars, then mirrored to Pulp at release. Later onboarding of deps does **not** republish the same semver to bump level ([point-in-time assertion](#dependency-closure-compliance-l1-l2-l3)). Direct deps only for v1; full lockfile closure is a later tightening.
+**Compliance:** Level is computed on **on-push** assess (initial gap lists + level). **Release closure updater** may advance waiter packages when dependencies land (mutates gap lists + `compliance_level` on compliance OCI and Pulp labels). Global **closure index** avoids full-catalog scans. Direct deps only for v1 assess; full lockfile closure is a later tightening.
 **PR vs merge commit:** Stage publish uses **PR head** revision. Merge promotion assumes the **merged PR** built successfully on that head (or final push to PR branch). If `main` moves without a fresh PR build, policy should require a green `on-pr` on the merge commit or re-trigger build — open operational detail.
 
 ### Triggers (Pipelines-as-Code)
@@ -630,16 +667,17 @@ PR → calunga-npm-onboarding
 **on-push (fail merge pipeline)**
 
 8. Resolve on-pr artifact for merge SHA; SBOM-in-tarball checks.  
-9. Compute `compliance_level` + write `*.tl-compliance.json` sidecars.  
+9. Compute `compliance_level` + write schema v3 `*.tl-compliance.json` sidecars.  
 10. oras push durable Quay snapshot (tarballs + compliance sidecars).
 
 **release (fail release / no Prod publish)**
 
 11. Re-verify snapshot contents.  
 12. cosign attest `.tgz` (KMS); optional compliance fields in predicate.  
-13. Publish `.tgz` to Pulp Prod; publish compliance as **adjacent** records + labels.  
-14. EC / CVE policy when wired.  
-15. Prod publish only from release pipeline service account.
+13. Publish `.tgz` to Pulp Prod; push compliance OCI + Pulp labels per package.  
+14. Run **`update-npm-closure update`** per released package; maintain global closure index OCI.  
+15. EC / CVE policy when wired.  
+16. Prod publish only from release pipeline service account.
 ### Python `index` parallel
 
 | Step | Python | npm TL (this proposal) |
@@ -677,7 +715,7 @@ AI must **not** run inside the hermetic build with registry credentials or trigg
 | libc      | glibc (UBI)                                 |
 | Node      | 20 LTS (example; pin per builder image tag) |
 | Factory toolchain | Must satisfy **onboarded** native builds (e.g. node-gyp, C++ standard). Raising compiler requirements is a **`plumbing` npm-builder** change (gcc-toolset on UBI 8, or newer UBI base), not a per-recipe version downgrade. |
-| Registry  | **Prod:** TL npm registry for installs; **Stage:** optional PR builds; **L1/L2** may mix upstream npm for missing deps per compliance sidecar `closure_gaps` |
+| Registry  | **Prod:** TL npm registry for installs; **Stage:** optional PR builds; **L1/L2** may mix upstream npm for deps listed in `missing_gaps` |
 
 
 musl / arm64: out of scope until v1.1 manifests declare additional `outputs`.
@@ -738,7 +776,7 @@ musl / arm64: out of scope until v1.1 manifests declare additional `outputs`.
 - Final repo name: `calunga-npm-onboarding` vs other
 - Scope namespace: `@calunga/` vs `@redhat-trusted-libraries/`
 - Directory layout: `packages/<name>/<version>/` vs single manifest per name
-- **Decided:** compliance is **point-in-time** per `name@version`; no TL-only semver; no republish solely to raise L1→L3
+- **Decided:** no TL-only semver suffixes on published `name@version`; assess writes initial compliance; **release closure updater** may advance waiter levels (L1→L2→L3) via gap-list mutation on compliance OCI + Pulp labels — not by republishing the waiter tarball
 - **Decided:** three-stage publish — **Pulp Stage** (on-pr build) → **Quay OCI** (on-push promote) → **Pulp Prod** (release)
 - on-push: promote from Stage vs rebuild on merge (default: **promote**; document merge-commit / PR head alignment)
 - Who owns long-term recipe maintenance (onboarder vs TL SRE)
