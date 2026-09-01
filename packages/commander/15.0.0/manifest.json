@@ -1,0 +1,24 @@
+{
+  "name": "commander",
+  "version": "15.0.0",
+  "description": "The complete solution for node.js command-line interfaces",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/tj/commander.js.git",
+    "ref": "v15.0.0",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "15.0.0"
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/commander-15.0.0.tgz",
+      "pulp_name": "commander"
+    }
+  ]
+}
