@@ -1,7 +1,7 @@
 # Contributing — npm Trusted Libraries onboarding
 
 Onboard packages under `packages/<name>/<version>/`. See
-[proposal](docs/proposal-npm-trusted-libraries-onboarding.md) and
+[proposal](docs/proposal-npm-lightwell-onboarding.md) and
 [POC plan](docs/poc_implementation_plan.md).
 
 ## Recipe layout
@@ -16,7 +16,7 @@ packages/<name>/<version>/
 
 ## Rules
 
-1. **Build from git source** at `source.ref` — never repack from registry.npmjs.org.
+1. **Build from git source** at `source.ref` — never repack from registry.npmjs.org. Set `stream` to `validated` (upstream git → existing Pulp `npm-registry`) or `remediated` (fork with backport → a **new** Pulp repo, not created in PoC). PoC releases always upload to `npm-registry`.
 2. **`build.entrypoint.sh` must not publish** — no `npm publish`, cosign keys, or registry tokens.
 3. **One manifest → one factory run → all `outputs[]`** tarballs (Tier B: main + platform).
 4. Do **not** author `compliance_level` / `closure_gaps` — CI computes those later.
