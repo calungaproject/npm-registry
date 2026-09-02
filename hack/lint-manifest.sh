@@ -63,6 +63,19 @@ validate_manifest() {
             ;;
     esac
 
+    stream="$(jq -r '.stream // empty' "${manifest}")"
+    if [[ -z "${stream}" ]]; then
+        echo "Missing required field: stream in ${manifest}" >&2
+        exit 1
+    fi
+    case "${stream}" in
+        validated|remediated) ;;
+        *)
+            echo "stream must be validated or remediated (got ${stream})" >&2
+            exit 1
+            ;;
+    esac
+
     [[ "${pkg_dir}" == "packages/${name}/${version}" ]] || {
         echo "Directory ${pkg_dir} must match packages/${name}/${version}" >&2
         exit 1

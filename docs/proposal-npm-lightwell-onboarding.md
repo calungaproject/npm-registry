@@ -1,26 +1,33 @@
-# Proposal: npm Trusted Libraries — factory + recipe onboarding
+# Proposal: npm Lightwell — factory + recipe onboarding
 
 
 | Field       | Value                    |
 | ----------- | ------------------------ |
 | **Status**  | Draft                    |
-| **Authors** | TL team (draft for review) |
-| **Date**    | 2026-05-20               |
+| **Authors** | Lightwell / TL team (draft for review) |
+| **Date**    | 2026-09-02               |
 
 
 ## Summary
 
-Trusted Libraries (TL) for npm adopts a **factory + recipe** model:
+Lightwell for npm adopts a **factory + recipe** model with two **streams** that share the same factory:
 
-- **TL** operates CI/CD, standard **linux-x64 glibc** builder images, SBOM generation, signing, and Pulp publish — the **trusted factory**.
-- **Onboarders** supply, per package version: a **manifest** (JSON metadata), an **entrypoint build script**, and a **smoke-test script** — the **recipe**.
-- TL does **not** infer source locations, build commands, or native/binary layout from npm metadata alone.
-- **Every onboarded version is built from source** at the git `ref` in the manifest. TL does **not** republish tarballs downloaded from registry.npmjs.org.
+| Stream | Lightwell name | Pulp repository | What it is | PoC |
+|--------|----------------|-----------------|------------|-----|
+| **`validated`** | Validated | **Existing** `npm-registry` (`javascript/` distribution) | Rebuild **upstream** git at `source.ref` (the npm version’s tag/commit). Publish identity matches community `name@version`. | **This is what the PoC implements** (all releases go here today). |
+| **`remediated`** | Remediated | **New** repo (name TBD) + its own distribution | Same recipe + factory, but `source.url` / `source.ref` point at a **git fork** where the CVE **backport** lives. Publish identity is a **product decision** (same semver vs bumped version — [open](#open-decision-remediated-version-identity)). | Recipe shape is defined; **Pulp repo and `stream`→repo routing are not wired**. |
+
+- **Lightwell** operates CI/CD, standard **linux-x64 glibc** builder images, SBOM generation, signing, and Pulp publish — the **trusted factory**.
+- **Onboarders** supply, per package version: a **manifest** (JSON metadata, including `stream`), an **entrypoint build script**, and a **smoke-test script** — the **recipe**.
+- The factory does **not** infer source locations, build commands, or native/binary layout from npm metadata alone.
+- **Every onboarded version is built from source** at the git `ref` in the manifest. The factory does **not** republish tarballs downloaded from registry.npmjs.org.
 - **Tier B/C:** one manifest entry produces **all** declared `outputs` (main npm package + linux-x64 platform package) in a **single** factory run of `build.entrypoint.sh`.
 
-Onboarding lives in a **dedicated Calunga git repository** (separate from Python `index/onboarded_packages/`). Builder images are defined and built from **`plumbing`** (or a documented image pipeline there).
+Onboarding lives in a **dedicated Calunga git repository** (`npm-registry`; historically discussed as `calunga-npm-onboarding`). Builder images are defined and built from **`plumbing`**.
 
 Human review is required on every onboarding change; AI agents may **draft** PRs but do not sign releases or approve policy gates.
+
+**Consumption** is one customer `registry=` URL (npm does not chain registries client-side). A **proxy** (Pulp virtual repo, Artifactory/Nexus, Verdaccio, or equivalent) implements: **remediated → 404 → validated → 404 → customer-chosen fallback or default registry.npmjs.org**. Lightwell **need not operate** that proxy or **redistribute** the public npmjs catalog — see [Consumer registry URL and proxy chain](#consumer-registry-url-and-proxy-chain).
 
 ### High-level flow: agents → factory → multi-Pulp publish
 
@@ -47,9 +54,9 @@ flowchart TB
     Release[Release<br/>sign · multi-Pulp publish]
   end
 
-  subgraph registries [Pulp registry families]
-    RH[Red Hat Pulp<br/>internal app builds]
-    LwCve[Lightwell · Remediated<br/>CVE backports]
+  subgraph registries [Registry streams]
+    Val[Pulp npm-registry<br/>Validated · current]
+    Rem[Pulp new repo<br/>Remediated · TBD]
     LwPriv[Lightwell · Private<br/>customer / group repos]
   end
 
@@ -64,8 +71,9 @@ flowchart TB
   Agent3 --> OnPr
   OnPr --> OnPush
   OnPush --> Release
-  %% Single edge into the subgraph — avoids Mermaid's messy 1→3 fan-out bar
-  Release --> registries
+  Release --> Val
+  Release --> Rem
+  Release --> LwPriv
 ```
 
 Consumers (RH engineering and Lightwell subscribers) pull from the registry family that matches their access — see the output table below.
@@ -88,13 +96,15 @@ Consumers (RH engineering and Lightwell subscribers) pull from the registry fami
 
 Input to the factory: an approved recipe PR. Output of the factory: signed packages + compliance records ready for multi-registry publish.
 
-#### Output — Pulp registry families
+#### Output — registry streams (Pulp content)
 
-| Registry | Audience | Notes |
-| -------- | -------- | ----- |
-| **Red Hat Pulp** | Internal | Shared npm index for Red Hat teams building applications — enterprise-wide consumption of TL-built packages. |
-| **Lightwell · Remediated** | Paid Lightwell subscription | Packages with CVE fixes applied by TL — including **backports** to customer-pinned versions, not only latest community releases. |
-| **Lightwell · Private** | Paid Lightwell subscription | Private repositories for a specific customer or customer group — curated / exclusive package sets. |
+| Registry | Manifest `stream` | Pulp repository | Notes |
+| -------- | ----------------- | --------------- | ----- |
+| **Validated** | `validated` | **Existing** `npm-registry` (PoC `javascript/` distribution) | Factory rebuild of **upstream** git. Same `name@version` as npmjs. |
+| **Remediated** | `remediated` | **New** Pulp npm repository (name TBD) + its own distribution | Factory rebuild of a **fork** with backported CVE fixes. Version string is an [open decision](#open-decision-remediated-version-identity). |
+| **Lightwell · Private** | (separate repos) | Per-customer Pulp repos | Private repositories for a specific customer or group. |
+
+Customers typically configure **one** `.npmrc` `registry=` URL. The **proxy chain** (remediated → validated → fallback) is described below; it is not three URLs in the npm client.
 
 ---
 
@@ -113,6 +123,115 @@ Python RHTL pins versions in `index/onboarded_packages/<name>.json` and builds v
 | **A** | Pure JS; no linux-x64 binary package required | `express` |
 | **B** | Platform optional family; main pkg + one TL linux-x64 binary package | `esbuild`, `sharp` |
 | **C** | Compile-heavy; allowlisted only; strict smoke + recipe review | node-gyp-heavy deps |
+
+---
+
+## Streams: `validated` vs `remediated`
+
+Recipes declare `stream` in `manifest.json`. Both streams use the **same** Konflux factory, builder images, SBOM, signing, and Pulp upload **task**. Release **routes by `stream`** to **two Pulp npm repositories** (same domain, different repo + distribution):
+
+| Manifest `stream` | Pulp repository | Distribution / content (illustrative) | Status |
+| ----------------- | --------------- | ------------------------------------- | ------ |
+| `validated` | **Current** PoC repo: `npm-registry` | `…/public-trusted-libraries/javascript/` | **Ships today** |
+| `remediated` | **New** repo (name TBD, e.g. `npm-registry-remediated`) | Separate `base_path` (e.g. `javascript-remediated/`) | **Not in PoC** — create when Remediated recipes exist |
+
+PoC **does not** switch Pulp targets yet: every release still uploads to `npm-registry` / `javascript/`. Wiring `stream` → repository is a follow-up on the RPA / `upload-npm-pulp` params (`pulpRepository`), not a factory rebuild.
+
+```mermaid
+flowchart LR
+  subgraph recipe [Recipe]
+    M["manifest.json<br/>stream + source"]
+  end
+
+  subgraph git [Git input]
+    Up[Upstream tag<br/>e.g. v4.17.21]
+    Fork[Fork + backport<br/>e.g. v4.17.21-rh1]
+  end
+
+  Factory[Same factory<br/>entrypoint · smoke · SBOM · sign]
+  ValPulp["Pulp npm-registry<br/>Validated · current"]
+  RemPulp["Pulp npm-registry-remediated<br/>Remediated · new"]
+
+  M -->|stream: validated| Up
+  M -->|stream: remediated| Fork
+  Up --> Factory
+  Fork --> Factory
+  Factory -->|validated| ValPulp
+  Factory -->|remediated| RemPulp
+```
+
+### Validated (PoC)
+
+- **`stream`: `"validated"`**
+- `source.url` is the **community / upstream** repository (or a mirror of it).
+- `source.ref` is the tag or commit that corresponds to the **npm version** being onboarded (`upstream_npm.version`).
+- Published `name` / `version` **match** that npm identity (e.g. `lodash@4.17.21`).
+- **Immutable once released:** do not overwrite the tarball for a given `name@version` on Validated (recipe fixes onboard a new directory or follow rebuild policy). First lockfile cutover to Lightwell refreshes `integrity`; later catalog growth is normal version upgrades, not weekly checksum resets.
+
+This is the Trusted Libraries / **Validated** catalog: source-built drop-in for the same semver the community shipped.
+
+### Remediated (same process, forked source)
+
+- **`stream`: `"remediated"`**
+- Factory and recipe **files are the same shape**: `manifest.json`, `build.entrypoint.sh`, `verify.smoke.sh` under `packages/<name>/<published-version>/`.
+- `source.url` is a **git fork** (or downstream remote) where the backport is maintained.
+- `source.ref` is the fork tag/branch/commit that **contains the fix** (not necessarily the upstream release tag).
+- `upstream_npm.version` still records the **community line** being remediated (for review: “this rebuild remediates npm `4.17.21`”).
+- Published `version` follows the [open decision](#open-decision-remediated-version-identity) (keep `4.17.21` vs bump).
+
+**How to remediate with a recipe**
+
+1. Fork upstream (or use an existing Lightwell/Red Hat fork). Apply the backport; tag a **reviewable** ref (e.g. `v4.17.21-rh1`).
+2. Copy or draft a recipe as for Validated. Set `"stream": "remediated"`.
+3. Point `source` at the **fork URL + backport ref**. Do **not** build from npmjs tarballs.
+4. Set `name` / `version` to the **publish identity** (same as upstream or bumped — per policy).
+5. Keep `upstream_npm` as the vulnerable community version + integrity for **audit**, not as build input.
+6. Open a PR to `npm-registry`. Human review of the **fork diff** (backport) plus entrypoint/smoke is required. Agent 2 may draft the recipe; it must not invent a fork URL.
+7. Merge → same on-pr / on-push / release path; release **`pulpRepository`** is the **new Remediated repo**, not `npm-registry`.
+
+Remediated does **not** require a second factory. It is a **different git `source`** and a **different publish target**.
+
+---
+
+## Consumer registry URL and proxy chain
+
+npm clients do **not** try a second registry on 404. Customers set **one** `registry=` in `.npmrc` (project or org). Fallback is implemented by a **registry proxy / virtual repository**, not by npm.
+
+**Intended lookup order** (logical; one URL in `.npmrc`):
+
+```text
+npm install foo@x.y.z
+  → customer Lightwell URL
+       1. Remediated catalog   (stream: remediated)
+       2. on 404 → Validated   (stream: validated)
+       3. on 404 → fallback:
+            a. customer-chosen registry (Artifactory group, internal npm, etc.), or
+            b. default: registry.npmjs.org
+```
+
+```mermaid
+flowchart TB
+  App["Customer .npmrc<br/>registry = one URL"]
+  Proxy["Proxy / virtual repo<br/>Pulp · Artifactory · Nexus · Verdaccio"]
+  Rem[Remediated Pulp]
+  Val[Validated Pulp]
+  FB["Fallback<br/>customer registry or npmjs"]
+
+  App --> Proxy
+  Proxy -->|hit| Rem
+  Rem -->|404| Val
+  Val -->|404| FB
+```
+
+**Legal / redistribution:** Lightwell **does not have to operate** a proxy that caches or republishes the **entire** public npmjs catalog. Prefer:
+
+- **Tools and instructions** so the **customer** (or RH shared service) configures the virtual repo in **their** Artifactory/Nexus/Pulp, pointing remotes at Lightwell Remediated, Lightwell Validated, then **their** existing npmjs remote.
+- Lightwell publishes **only factory-built** Validated and Remediated content.
+- Default fallback to npmjs is **the customer’s remote**, not Lightwell mirroring npmjs.
+
+Strict **Validated-only** (no npmjs fallback) remains an org policy option (L3-style). Remediated-first is for subscribers who want CVE backports when present.
+
+**Cutover:** changing `.npmrc` to the proxy URL plus a **one-time lockfile `integrity` / `resolved` refresh** for packages now served from Validated (bytes differ from npmjs). That is migration, not a standing weekly reset, as long as Validated versions stay **immutable**.
 
 ---
 
@@ -210,7 +329,8 @@ Machine-readable metadata for CI and review.
 {
   "name": "esbuild",
   "version": "0.28.0",
-  "description": "JavaScript bundler — TL linux-x64 binary + JS wrapper",
+  "description": "JavaScript bundler — linux-x64 binary + JS wrapper",
+  "stream": "validated",
   "native_tier": "B",
   "source": {
     "url": "https://github.com/evanw/esbuild.git",
@@ -245,17 +365,48 @@ Machine-readable metadata for CI and review.
 }
 ```
 
-Do **not** author `compliance_level`, `missing_gaps`, or `pending_l3_gaps` in the onboarding manifest. The pipeline **computes** them on **on-push** after querying the TL registry and writes them as **sidecars** (not inside consumer packages). See [Where compliance metadata is stored](#where-compliance-metadata-is-stored).
+Do **not** author `compliance_level`, `missing_gaps`, or `pending_l3_gaps` in the onboarding manifest. The pipeline **computes** them on **on-push** after querying the Validated registry and writes them as **sidecars** (not inside consumer packages). See [Where compliance metadata is stored](#where-compliance-metadata-is-stored).
+
+**Remediated example** (same factory; fork is the build input). `version` here assumes a **bump** (open decision); `upstream_npm` is the line being fixed:
+
+```json
+{
+  "name": "lodash",
+  "version": "4.17.22",
+  "stream": "remediated",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/example-org/lodash.git",
+    "ref": "v4.17.21-rh1",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "4.17.21",
+    "integrity": "sha512-..."
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/lodash-4.17.22.tgz",
+      "pulp_name": "lodash"
+    }
+  ]
+}
+```
 
 Fields are illustrative; JSON Schema lives in `docs/manifest.schema.json`.
 
 
 | Field                             | Purpose                                                      |
 | --------------------------------- | ------------------------------------------------------------ |
-| `name` / `version`                | TL publish identity (aligned with npm name when possible)    |
+| `name` / `version`                | Publish identity (Validated: match npmjs. Remediated: per versioning decision) |
+| `stream`                          | `validated` → existing Pulp `npm-registry`. `remediated` → **new** Pulp repo. |
 | `native_tier`                     | `A` pure JS, `B` platform optional family, `C` compile-heavy |
-| `source`                          | **Authoritative build input** — git URL + tag or commit        |
-| `upstream_npm`                    | Expected npm release version + optional integrity; **verification only** (ref↔version), not fetched for build |
+| `source`                          | **Authoritative build input** — git URL + tag or commit. Validated: upstream. Remediated: **fork** with the fix. |
+| `upstream_npm`                    | Community npm version + optional integrity; **verification / audit only**, not fetched for build |
 | `entrypoint` / `smoke`            | Filenames in same directory                                  |
 | `outputs`                         | All tarballs this manifest produces in one build (main + platform) |
 | `optional_dependencies_published` | Platform packages wired from main package (Tier B/C)           |
@@ -352,13 +503,14 @@ Compliance describes **where production dependencies may resolve at `npm install
 
 **Assess vs release closure updates:**
 
-- TL publishes **`name@version` matching upstream semver only** (e.g. `vite@5.4.0`). No TL-specific suffixes (`5.4.0+tl.1`).
+- **Validated** publishes **`name@version` matching upstream semver** (e.g. `vite@5.4.0`). Do not use Lightwell-only suffixes on the Validated stream.
+- **Remediated** version strings are an [open decision](#open-decision-remediated-version-identity).
 - **On-push assess** writes the **initial** compliance record (level + gap lists + immutable deps).
 - **Release closure updater** (`update-npm-closure` in plumbing-utils) may **mutate only** `missing_gaps`, `pending_l3_gaps`, `compliance_level`, `closure_updated_at`, and `compliance_revision` on **waiter** packages when a blocker lands or reaches L3 — without republishing the blocker’s tarball.
 - Example: when `esbuild@0.28.0` reaches L3, packages that listed it in `pending_l3_gaps` can move **L2 → L3**; their compliance OCI and Pulp `tl.compliance_level` label are updated in place.
 - **`direct_dependencies` is immutable** after assess (manifest intent only); full dependency detail remains in the published package / lockfile.
 
-**Re-publish same semver** only for **recipe/security fixes** (bad build, wrong ref, CVE rebuild policy) — not as a substitute for closure propagation (that is the closure updater’s job).
+**Re-publish same semver on Validated** only for **recipe/security fixes** (bad build, wrong ref) — not as a substitute for closure propagation (that is the closure updater’s job). Same-semver overwrite as a **Remediated CVE channel** is the other side of the versioning open decision.
 
 **Incremental growth:** onboard leaves first (often **L3** at first publish — no packed `dependencies`). Parents onboarded early may publish at **L1/L2**; the **global closure index** records which packages wait on each blocker so landing a dep refreshes waiters without scanning the whole catalog. AI prioritizes onboarding deps that appear in packed `dependencies` of pending recipes.
 
@@ -773,14 +925,32 @@ musl / arm64: out of scope until v1.1 manifests declare additional `outputs`.
 
 ## Open decisions
 
-- Final repo name: `calunga-npm-onboarding` vs other
+- Final repo name: `calunga-npm-onboarding` vs `npm-registry` (current PoC repo)
 - Scope namespace: `@calunga/` vs `@redhat-trusted-libraries/`
 - Directory layout: `packages/<name>/<version>/` vs single manifest per name
-- **Decided:** no TL-only semver suffixes on published `name@version`; assess writes initial compliance; **release closure updater** may advance waiter levels (L1→L2→L3) via gap-list mutation on compliance OCI + Pulp labels — not by republishing the waiter tarball
+- **Decided (Validated):** no Lightwell-only semver suffixes on Validated `name@version`; assess writes initial compliance; **release closure updater** may advance waiter levels (L1→L2→L3) via gap-list mutation on compliance OCI + Pulp labels — not by republishing the waiter tarball
+- **Open (Remediated version identity):** see below
 - **Decided:** three-stage publish — **Pulp Stage** (on-pr build) → **Quay OCI** (on-push promote) → **Pulp Prod** (release)
 - on-push: promote from Stage vs rebuild on merge (default: **promote**; document merge-commit / PR head alignment)
-- Who owns long-term recipe maintenance (onboarder vs TL SRE)
+- Who owns long-term recipe maintenance (onboarder vs Lightwell SRE)
 - Minimum compliance level for production consumers (org policy defaulting to `L3`)
+- Who hosts the [consumer proxy](#consumer-registry-url-and-proxy-chain) (customer Artifactory vs RH-managed vs Pulp virtual repo)
+- Exact Pulp **repository name** and `base_path` for Remediated (Validated keeps `npm-registry` / `javascript/`)
+
+### Open decision: Remediated version identity
+
+**Rejected:** npm **build metadata** (`4.17.21+lwl.1`) is not a distinct publishable version (unlike Python PEP 440 `+cgr.N`). npm **prereleases** (`4.17.21-lwl.1`) do not satisfy `^4.17.21` or an exact pin of `4.17.21`, so they are not a delivery channel. Remediated publish identity is only:
+
+| Option | Publish as | Customer update path | Exact parent `"lodash": "4.17.21"` | Notes |
+| ------ | ---------- | -------------------- | ----------------------------------- | ----- |
+| **A. Bump** | Next community-style semver, e.g. patch `4.17.22` | Familiar: `npm update`, Dependabot, Renovate | Blocked unless app `overrides` or parent republishes | Matches org CVE process |
+| **B. Same semver** | Overwrite / publish `4.17.21` on **Remediated** only | Lockfile `resolved` + `integrity` refresh; not a version bump | Still satisfies the pin | Frozen-pin SKU; Dependabot typically **does not** notice digest-only changes; `npm ci` fails (`EINTEGRITY`) until lockfile updates |
+
+**Leaning (product):** prefer **Option A (patch/minor bump)** so remediated rides existing update tooling; document `overrides` for exact parent pins (uncommon on public npm for lodash-class deps; more likely internally). Use **Option B** only if the SKU is “do not change the customer pin.”
+
+**Validated stays Option B-shaped for identity** (same as upstream) but **immutable** — no silent overwrite for CVEs; CVEs go through Remediated recipes.
+
+Recipe directory is always `packages/<name>/<published-version>/` — the folder name is the **Pulp version**, which may differ from `upstream_npm.version` when bumping.
 
 ---
 

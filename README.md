@@ -6,7 +6,7 @@ Onboarding repository for **npm Trusted Libraries** — package recipes, manifes
 
 | Document | Purpose |
 | -------- | ------- |
-| [proposal-npm-trusted-libraries-onboarding.md](docs/proposal-npm-trusted-libraries-onboarding.md) | Design |
+| [proposal-npm-lightwell-onboarding.md](docs/proposal-npm-lightwell-onboarding.md) | Design (Validated vs Remediated) |
 | [poc_implementation_plan.md](docs/poc_implementation_plan.md) | Engineering phases |
 | [ecp-policy-debt.md](docs/ecp-policy-debt.md) | EC exclusions to revisit before production |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Onboarder checklist |
