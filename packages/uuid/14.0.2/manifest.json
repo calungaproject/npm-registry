@@ -1,0 +1,26 @@
+{
+  "name": "uuid",
+  "version": "14.0.2",
+  "description": "RFC9562 (formerly RFC4122) UUIDs for JavaScript",
+  "stream": "validated",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/uuidjs/uuid.git",
+    "ref": "v14.0.2",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "14.0.2",
+    "integrity": "sha512-xZe/16rV4aa+HGSOCiY2YeLT1OybRLrrkL/Rqaq7p7GMVXjFh+6wN4oMYgjFmnSnhY8t6Xpdl2l9qmnHYuMHwQ=="
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/uuid-14.0.2.tgz",
+      "pulp_name": "uuid"
+    }
+  ]
+}
