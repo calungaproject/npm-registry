@@ -1,0 +1,25 @@
+{
+  "name": "zod",
+  "version": "4.5.4",
+  "description": "TypeScript-first schema validation with static type inference",
+  "stream": "validated",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/colinhacks/zod.git",
+    "ref": "v4.5.4",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "4.5.4"
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/zod-4.5.4.tgz",
+      "pulp_name": "zod"
+    }
+  ]
+}
