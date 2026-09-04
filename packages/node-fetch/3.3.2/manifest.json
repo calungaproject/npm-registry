@@ -1,0 +1,26 @@
+{
+  "name": "node-fetch",
+  "version": "3.3.2",
+  "description": "A light-weight module that brings window.fetch to Node.js",
+  "stream": "validated",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/node-fetch/node-fetch.git",
+    "ref": "v3.3.2",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "3.3.2",
+    "integrity": "sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA=="
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/node-fetch-3.3.2.tgz",
+      "pulp_name": "node-fetch"
+    }
+  ]
+}
