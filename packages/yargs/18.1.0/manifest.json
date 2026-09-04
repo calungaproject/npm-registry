@@ -1,0 +1,26 @@
+{
+  "name": "yargs",
+  "version": "18.1.0",
+  "description": "yargs the modern, pirate-themed, successor to optimist",
+  "stream": "validated",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/yargs/yargs.git",
+    "ref": "v18.1.0",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "18.1.0",
+    "integrity": "sha512-2rAgRKu54VsHkqI0/tYkmluGXHD4KW7yZoycuqDQ15QOTnc2VVfy0nN/1eMhnQLO00A+dwtK20xuCnc1YGeUyg=="
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/yargs-18.1.0.tgz",
+      "pulp_name": "yargs"
+    }
+  ]
+}
