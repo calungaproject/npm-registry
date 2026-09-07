@@ -1,0 +1,26 @@
+{
+  "name": "chalk",
+  "version": "6.0.0",
+  "description": "Terminal string styling done right",
+  "stream": "validated",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/chalk/chalk.git",
+    "ref": "v6.0.0",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "6.0.0",
+    "integrity": "sha512-2uNTXIuTTxk7ciZgAU1BQcgnchcG0xXnrs6jzkQfj9SsRa9M2s5zE8WT96hS6KmG4MzWHSrvH43DF1m4XRkrFg=="
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/chalk-6.0.0.tgz",
+      "pulp_name": "chalk"
+    }
+  ]
+}
