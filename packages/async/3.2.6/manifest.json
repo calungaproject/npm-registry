@@ -1,0 +1,25 @@
+{
+  "name": "async",
+  "version": "3.2.6",
+  "description": "Higher-order functions and common patterns for asynchronous code",
+  "stream": "validated",
+  "native_tier": "A",
+  "source": {
+    "url": "https://github.com/caolan/async.git",
+    "ref": "v3.2.6",
+    "ref_type": "tag"
+  },
+  "upstream_npm": {
+    "version": "3.2.6"
+  },
+  "entrypoint": "build.entrypoint.sh",
+  "smoke": "verify.smoke.sh",
+  "outputs": [
+    {
+      "id": "main",
+      "type": "npm-package",
+      "path": "out/async-3.2.6.tgz",
+      "pulp_name": "async"
+    }
+  ]
+}
