@@ -1,16 +1,16 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: promote-npm
+  name: build-npm-compliance
   labels:
     # Conforma pipeline-required-tasks selector (see plumbing/policy-data/).
-    pipelines.openshift.io/runtime: promote-npm
+    pipelines.openshift.io/runtime: build-npm-compliance
 spec:
   description: |
-    npm Trusted Libraries — on-push promote pipeline.
-    Identifies packages from the merge (HEAD^), promotes the matching
-    on-pr-<pr-number>.npm Quay OCI artifact to a durable :<sha>.npm snapshot
-    (verify SPDX SBOM + assess compliance). No rebuild.
+    npm Trusted Libraries — on-push rebuild + compliance pipeline.
+    Identifies packages from the merge (HEAD^), rebuilds via build-npm-package-oci-ta,
+    then assess-npm-compliance-oci-ta (SPDX verify + TL compliance sidecars) and
+    pushes a durable :<sha>.npm snapshot. Does not promote on-pr OCI.
   params:
     - name: git-url
       type: string
@@ -19,11 +19,6 @@ spec:
       default: ""
     - name: output-image
       description: Durable Quay tag prefix; npm packages land at $(output-image).npm
-      type: string
-    - name: source-npm-image
-      description: >-
-        PR OCI artifact to promote (…:on-pr-<pr-number>.npm). Must exist from a
-        green on-pr build for the merged pull request.
       type: string
     - name: image-expires-after
       description: Empty for durable snapshot tags
@@ -36,11 +31,27 @@ spec:
       type: string
       default: "0"
     - name: builder-image
-      description: Pinned npm-builder (identify scripts + promote verify/compliance)
+      description: Pinned npm-builder (identify scripts + BUILDER_IMAGE for build/assess)
       type: string
-    - name: task-promote-npm-oci-bundle
-      description: Tekton bundle image for promote-npm-oci-ta
+    - name: task-build-npm-package-bundle
+      description: Tekton bundle image for build-npm-package-oci-ta
       type: string
+    - name: task-assess-npm-compliance-bundle
+      description: >-
+        Tekton bundle image for assess-npm-compliance-oci-ta
+        (Quay component still named task-promote-npm-oci)
+      type: string
+    - name: publish-to-pulp
+      description: When true, also npm publish to Pulp Stage (future; requires stage secret)
+      type: string
+      default: "false"
+    - name: pulp-npm-registry-url
+      description: Pulp Stage npm registry URL (only when publish-to-pulp is true)
+      type: string
+      default: ""
+    - name: npm-publish-secret-name
+      type: string
+      default: rhtl-pulp-npm-stage-credentials
     - name: skip-checks
       type: string
       default: "false"
@@ -49,9 +60,9 @@ spec:
       default: "false"
   results:
     - name: IMAGE_URL
-      value: $(tasks.promote-npm-oci.results.IMAGE_URL)
+      value: $(tasks.assess-npm-compliance.results.IMAGE_URL)
     - name: IMAGE_DIGEST
-      value: $(tasks.promote-npm-oci.results.IMAGE_DIGEST)
+      value: $(tasks.assess-npm-compliance.results.IMAGE_DIGEST)
     - name: CHAINS-GIT_URL
       value: $(tasks.clone-repository.results.url)
     - name: CHAINS-GIT_COMMIT
@@ -124,12 +135,49 @@ spec:
             value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1@sha256:31d5bd001a5671331db1b5ef176e8c582e734cb60f724df4d73b0b230118d8c9
           - name: kind
             value: task
-    - name: promote-npm-oci
+    - name: build-npm-package
       runAfter:
         - identify-packages
+      when:
+        - input: "$(tasks.identify-packages.results.SCRIPT_OUTPUT)"
+          operator: in
+          values: ["has-packages"]
+      params:
+        - name: PACKAGES
+          value: $(tasks.identify-packages.results.SCRIPT_OUTPUT_ARRAY)
+        - name: SOURCE_ARTIFACT
+          value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+        - name: BUILDER_IMAGE
+          value: $(params.builder-image)
+        - name: IMAGE
+          value: $(params.output-image).npm
+        - name: IMAGE_EXPIRES_AFTER
+          value: $(params.image-expires-after)
+        - name: PULP_NPM_REGISTRY_URL
+          value: $(params.pulp-npm-registry-url)
+        - name: NPM_PUBLISH_SECRET_NAME
+          value: $(params.npm-publish-secret-name)
+        - name: PUBLISH_TO_PULP
+          value: $(params.publish-to-pulp)
+      taskRef:
+        resolver: bundles
+        params:
+          - name: name
+            value: build-npm-package-oci-ta
+          - name: bundle
+            value: $(params.task-build-npm-package-bundle)
+          - name: kind
+            value: task
+    - name: assess-npm-compliance
+      runAfter:
+        - build-npm-package
+      when:
+        - input: "$(tasks.identify-packages.results.SCRIPT_OUTPUT)"
+          operator: in
+          values: ["has-packages"]
       params:
         - name: SOURCE_IMAGE
-          value: $(params.source-npm-image)
+          value: $(tasks.build-npm-package.results.IMAGE_REF)
         - name: IMAGE
           value: $(params.output-image).npm
         - name: BUILDER_IMAGE
@@ -146,9 +194,9 @@ spec:
         resolver: bundles
         params:
           - name: name
-            value: promote-npm-oci-ta
+            value: assess-npm-compliance-oci-ta
           - name: bundle
-            value: $(params.task-promote-npm-oci-bundle)
+            value: $(params.task-assess-npm-compliance-bundle)
           - name: kind
             value: task
   workspaces:
