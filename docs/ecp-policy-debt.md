@@ -77,10 +77,10 @@ Expected EC outcome after sync: **pass** on a PR that builds real packages (opti
 - PAC CEL on both PLRs requires at least one non-README change under `packages/`,
   so infra-only and README-only PRs/merges do not start a PipelineRun (no empty
   Snapshot for EC).
-- Pipeline **`IMAGE_URL` / `IMAGE_DIGEST`** are **`build-npm-package` /
-  `promote-npm-oci` task results** (trusted via plumbing task bundles). Do not
-  add an inline `export-image-results` taskSpec — EC treats those as `<NAMELESS>`
-  untrusted.
+- Pipeline **`IMAGE_URL` / `IMAGE_DIGEST`** are **`build-npm-package`** (PR) /
+  **`assess-npm-compliance`** (push) task results (trusted via plumbing task
+  bundles). Do not add an inline `export-image-results` taskSpec — EC treats
+  those as `<NAMELESS>` untrusted.
 
 ## Trigger to reopen this doc
 

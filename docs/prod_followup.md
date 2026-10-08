@@ -93,11 +93,11 @@ PoC spine when these are wired:
 | Topic | PoC today | Prod expectation |
 | ----- | --------- | ---------------- |
 | **Pulp Stage** | None — Quay `on-pr-*` only until release → Pulp Prod | Revisit pre-merge Stage registry if reviewers need `npm install` before merge |
-| **Promote source** | Quay on-pr artifact promoted on push (no rebuild) | Keep unless Stage returns; harden runbook when merge SHA has no green on-pr |
+| **On-push model** | Rebuild via `build-npm-package` then `assess-npm-compliance` → durable `:<sha>.npm` | Keep rebuild+assess; Quay component name for assess bundle remains `task-promote-npm-oci` |
 | **PAC path filter** | PR + push PLRs run when a non-README file under `packages/` changes | Keep for package releases; **add a second on-PR PipelineRun** (or CEL branch) filtered to `.tekton/***` so PipelineRun/pipeline edits can be tested without a package change |
 | **EC on build** | Relaxed / optional ITS until first packages; structural excludes for OCI factory | Make ITS **required** (`optional: "false"` on `calunga-npm-registry-main-enterprise-contract`); remove debt excludes per [ecp-policy-debt](./ecp-policy-debt.md) when SBOM/CVE/SAST gates are real |
 | **EC on release** | `registry-calunga-npm-prod` mirrors Python debt excludes + npm structural rules | Tighten debt excludes in step with build ECP; keep structural excludes for OCI/npm factory shape |
-| **Empty / infra-only snapshots** | Removed: PAC skips non-`packages/` changes; build/promote/upload fail if no `.tgz` | Keep PAC filters; fail closed on empty artifacts |
+| **Empty / infra-only snapshots** | Removed: PAC skips non-`packages/` changes; build/assess/upload fail if no `.tgz` | Keep PAC filters; fail closed on empty artifacts |
 | **Quay ImageRepository visibility** | **`public`** on `calunga-npm-registry-main` (matches Python `calunga-v2-index-main` PoC). Unblocks release `verify-conforma` `builtin.image.accessible` without releng `redhat-user-workloads-pull` on `release-pulp-calunga-prod`. Promoted `.npm` OCI artifacts are anonymously pullable from `quay.io` until changed. | **Revisit before prod:** prefer **private** for least exposure of interim OCI artifacts. Private requires `redhat-user-workloads-pull` on `release-pulp-calunga-prod` in `rhtap-releng-tenant` (releng-managed; confirm Argo sync + robot read on `calunga-tenant/*`). Release Conforma validates snapshot **`quay.io`** URLs, not Konflux **image-rbac-proxy** URLs. After flipping to private, re-run a full release and confirm `verify-conforma` + `extract-npm-artifacts` both pass. |
 
 ---
