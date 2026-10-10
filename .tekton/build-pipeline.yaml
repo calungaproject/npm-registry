@@ -74,7 +74,7 @@ spec:
           - name: name
             value: init
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-init:0.4.3@sha256:5f687152ab0661f84830877de93a8ec45cb0b756f71b24ac55133d03a4007936
+            value: quay.io/konflux-ci/tekton-catalog/task-init:0.4.3@sha256:7854d7babe4136e53e337f6433d952532314433b48bb62b422ddc02700934d85
           - name: kind
             value: task
     - name: clone-repository
@@ -97,7 +97,7 @@ spec:
           - name: name
             value: git-clone-oci-ta
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.2.6@sha256:3bcd4c39a346d29617013f4c47d245d38f020cdbf814cf3ce095911c528f5003
+            value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.2.6@sha256:a3678910c2bf9187a66a96066193cb41046fbb7097160bf2be6a374ed5e49d30
           - name: kind
             value: task
       workspaces:
@@ -124,7 +124,7 @@ spec:
           - name: name
             value: run-script-oci-ta
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1@sha256:31d5bd001a5671331db1b5ef176e8c582e734cb60f724df4d73b0b230118d8c9
+            value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1.3@sha256:ec40c7fd8efeb80c92e45c62b1acaff4a0c1882c3edd4bd14710e4115787e907
           - name: kind
             value: task
     - name: identify-packages
@@ -148,7 +148,7 @@ spec:
           - name: name
             value: run-script-oci-ta
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1@sha256:31d5bd001a5671331db1b5ef176e8c582e734cb60f724df4d73b0b230118d8c9
+            value: quay.io/konflux-ci/tekton-catalog/task-run-script-oci-ta:0.1.3@sha256:ec40c7fd8efeb80c92e45c62b1acaff4a0c1882c3edd4bd14710e4115787e907
           - name: kind
             value: task
     - name: build-npm-package
