@@ -76,8 +76,7 @@ What clients require of a registry:
 3. **`GET /-/npm/v1/keys`** returning `{ keys: [{ keyid, pemkey, expires }] }` —
    required for **keyed** (registry-signed / publish) attestations. Keyless
    Fulcio/Rekor provenance bundles are self-contained and skip this.
-4. **Subject binding** — in-toto statement subject is `pkg:npm/{name}@{version}`
-   with `digest.sha512` matching the tarball.
+4. **Subject binding** — in-toto statement subject is the canonical PURL for `pkg:npm/{name}@{version}` (scoped names: `pkg:npm/%40scope/name@…`) with `digest.sha512` matching the tarball.
 
 ## Problem
 
@@ -107,8 +106,8 @@ Without package-bound attestation content:
 8. **Serve the npm client contract** (revised — was a non-goal):
    - Stamp `dist.attestations` (url + provenance predicateType) into served packuments for versions that have attestations.
    - Serve `GET /-/npm/v1/attestations/{name}@{version}` on distributions.
-   - Serve `GET /-/npm/v1/keys` for keyed attestations (configurable; keyless-only registries may 404).
-9. **Sync:** mirror attestations + `dist.attestations` pointers when syncing from an upstream npm-compatible registry.
+   - Serve `GET /-/npm/v1/keys` for keyed attestations (configurable; keyless-only registries may 404). **Keyed-signing registries must serve their public keys here** — for a non-npmjs registry, `npm audit signatures` finds no TUF target for the host and falls back to this endpoint; without it, keyed attestations fail with `EMISSINGSIGNATUREKEY`. `npm audit signatures` verifies both keyed and keyless bundles natively, so the two modes impose no client-side branching.
+9. **Sync:** mirror attestations + `dist.attestations` pointers when syncing from an upstream npm-compatible registry. **Sync atomicity:** bundles and their packument pointers must become visible in the same repository-version commit — a packument pointer to a bundle that was not (yet) copied makes `npm audit signatures` fail for the mirrored package. The safest implementation derives pointers at serve time from committed associations (see open question 10), which makes this invariant hold by construction.
 10. **Accept client verification as the conformance test:** a Pulp-published repo must pass `npm audit signatures` end-to-end (and ideally pnpm provenance verification) — not just curl-shaped response inspection. See acceptance criteria.
 
 ## Non-goals (MVP)
@@ -166,14 +165,19 @@ Create/replace of the `(package, predicateType)` association must be **atomic** 
 
 **Validation (MVP — fail closed):**
 
-- Parseable Sigstore bundle: `mediaType` of `application/vnd.dev.sigstore.bundle+json` with `version` `0.1` or `0.2`; must contain `dsseEnvelope`.
+- Parseable Sigstore bundle: `mediaType` must be
+  `application/vnd.dev.sigstore.bundle+json` with a `version` **parameter** of
+  `0.1` or `0.2` (canonical bundles encode the version in the media type —
+  `application/vnd.dev.sigstore.bundle+json;version=0.1` — and have no
+  separate top-level `version` field); must contain `dsseEnvelope`.
 - **Required:** `dsseEnvelope.signatures` is a non-empty array (structural guard only — presence of at least one signature object, not cryptographic validity).
 - **Required:** `dsseEnvelope.payloadType` compatible with in-toto (`application/vnd.in-toto+json`).
+- **Required:** `verificationMaterial` present, and `verificationMaterial.tlogEntries` array-valued — npm clients destructure these directly (pacote reads `tlogEntries[0].integratedTime` for keyed attestations; sigstore-js verification consumes tlog/ctlog entries), so a bundle without them breaks client verification even though the signature is otherwise well-formed.
 - **Required:** decode the in-toto statement; `predicateType` must be on the **MVP allowlist**:
   - `https://slsa.dev/provenance/v1`
   - VSA predicate type URI as defined by [in-toto VSA](https://github.com/in-toto/attestation/blob/main/spec/predicates/vsa.md) (pin the exact string in implementation docs when implementing)
   - Allowlist must be **extensible** (setting / constant) so new predicate types do not need a new content type
-- **Required:** reject if no subject matches the selected package: subject name equals `pkg:npm/{name}@{version}` and `digest.sha512` equals the package tarball's sha512. Accept **sha256 in addition** (not instead) when present — it costs nothing and keeps cosign `verify-blob-attestation` flows working without reshaping.
+- **Required:** reject if no subject matches the selected package: subject name equals the **canonical** PURL for `pkg:npm/{name}@{version}` — note that scoped names encode the scope (`pkg:npm/%40scope/name@1.0.0`, as produced by npm's `npa.toPurl`), so the comparison must use canonical PURL encoding, not raw string interpolation — and `digest.sha512` equals the package tarball's sha512. Accept **sha256 in addition** (not instead) when present — it costs nothing and keeps cosign `verify-blob-attestation` flows working without reshaping.
 - **Required:** package is present in the target repository version (when associating into a repo).
 - Still **out of scope:** cryptographic signature verification / trust-policy checks inside Pulp. Docs and client guidance must state that **hosting ≠ verification**; consumers verify with `npm audit signatures`, cosign, sigstore, or slsa-verifier.
 
@@ -215,7 +219,7 @@ After Pulp lands MVP:
 | 7 | Exact VSA `predicateType` URI | Pin to current in-toto VSA spec string at implementation time. |
 | 8 | pulp CLI / content guards | Malformed bundle, non-allowlisted `predicateType`, subject mismatch fail closed. |
 | 9 | Keyed-attestation key management | Who owns `/-/npm/v1/keys` content (registry-side signing keys)? Keyless-only MVP can defer. |
-| 10 | Packument mutation vs derivation | Is `dist.attestations` stamped at publish time (stored in packument) or derived at serve time from repo-version associations? Derived avoids packument rewrite on backfill. |
+| 10 | Packument mutation vs derivation | Is `dist.attestations` stamped at publish time (stored in packument) or derived at serve time from repo-version associations? **Constraint either way:** backfilled attestations must become discoverable — stored pointers require packument update + cache invalidation whenever associations change; derived pointers (preferred) avoid that rewrite and make sync atomicity hold by construction. |
 
 ## References
 

@@ -27,6 +27,12 @@ npm requires the credentials as basic auth (e.g. via `~/.npmrc`
 
 ## Procedure — npm audit signatures (primary)
 
+Set shell variables:
+
+```bash
+REPOSITORY='<repository>'   # e.g. validated
+```
+
 Install the packages against the Lightwell registry, then audit:
 
 ```bash
@@ -36,6 +42,13 @@ npm install --registry \
 npm audit signatures --registry \
   "https://packages.redhat.com/api/npm/lightwell/npm/${REPOSITORY}/"
 ```
+
+**Lockfile caveat:** `--registry` does not rewrite `resolved` URLs already
+recorded in an existing package-lock.json — a locked install can still pull
+tarballs from npmjs. Either regenerate the lockfile against Lightwell
+(`rm package-lock.json && npm install --registry …`) or configure the registry
+in `.npmrc` (`@scope:registry=` / `registry=`) before locking, and verify the
+lockfile's `resolved` URLs point at the Lightwell registry before auditing.
 
 Expected output for an attested package:
 
@@ -77,27 +90,36 @@ curl -fsSLo release3.txt \
 sed -n '/-----BEGIN PUBLIC KEY-----/,$p' release3.txt > release3.pub
 ```
 
-Download the tarball (adjust the content path to your repository layout):
+Download the tarball (adjust the content path to your repository layout; the
+credentials mirror the `.npmrc` basic auth used by npm):
 
 ```bash
 curl -fsSLO \
+  --user "${LIGHTWELL_USERNAME}:${LIGHTWELL_TOKEN}" \
   "https://packages.redhat.com/api/pulp-content/lightwell/npm/${REPOSITORY}/${TARBALL}"
 ```
 
 Download the attestation bundles. npm attestations are Sigstore bundles; the
 DSSE envelope inside is what cosign consumes — extraction only, no reshaping
-(unlike the Python PEP 740 flow):
+(unlike the Python PEP 740 flow). Scoped package names must be URL-encoded
+(the `/` in `@scope/name` becomes `%2F`):
 
 ```bash
-curl -fsSLo "${TARBALL}.attestations.json" \
-  "https://packages.redhat.com/api/npm/lightwell/npm/${REPOSITORY}/-/npm/v1/attestations/${PACKAGE}@${VERSION}"
+PACKAGE_ENCODED=$(printf '%s' "${PACKAGE}" | jq -sRr @uri)
 
-jq '.attestations[0].bundle.dsseEnvelope' \
+curl -fsSLo "${TARBALL}.attestations.json" \
+  --user "${LIGHTWELL_USERNAME}:${LIGHTWELL_TOKEN}" \
+  "https://packages.redhat.com/api/npm/lightwell/npm/${REPOSITORY}/-/npm/v1/attestations/${PACKAGE_ENCODED}@${VERSION}"
+
+jq '.attestations[]
+    | select(.predicateType == "https://slsa.dev/provenance/v1")
+    | .bundle.dsseEnvelope' \
   "${TARBALL}.attestations.json" > "${TARBALL}.dsse.json"
 ```
 
 Verify the RELEASE3 signature and the tarball digest binding in the SLSA
-statement with cosign:
+statement with cosign. **This fallback verifies *keyed* (RELEASE3-signed)
+attestations**, which is how Lightwell signs its npm content:
 
 ```bash
 cosign verify-blob-attestation \
@@ -108,12 +130,22 @@ cosign verify-blob-attestation \
   "${TARBALL}"
 ```
 
+> **Keyless footnote:** bundles signed keylessly (Fulcio certificate + Rekor
+> transparency-log entry — the format upstream `npm publish --provenance`
+> produces, so they can appear when mirroring upstream registries) will **not**
+> verify against the RELEASE3 key. `npm audit signatures` handles both keyed
+> and keyless modes with no branching, so use the primary procedure for those.
+> If you must verify a keyless bundle out-of-band with cosign, pass the full
+> bundle instead of the extracted envelope:
+> `cosign verify-blob-attestation --bundle <bundle.json> --type https://slsa.dev/provenance/v1 <tarball>`.
+
 ### Caveat: sha256 vs sha512 subject digests
 
 npm statements bind the subject with `digest.sha512` (pacote checks sha512
 against the tarball integrity). `cosign verify-blob-attestation` computes the
 blob's **sha256** and matches it against statement subjects, so a sha512-only
-subject can fail with "no matching subjects". Two mitigations:
+subject can fail with "no matching subjects" — this applies to both the keyed
+(envelope) and keyless (bundle) cosign invocations above. Two mitigations:
 
 - **Producer-side (required):** the signing pipeline emits **both** sha256 and
   sha512 digests in the statement subject. Pulp accepts both (see the story
