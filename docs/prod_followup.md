@@ -65,7 +65,8 @@ PoC spine when these are wired:
 | Topic | PoC today | Prod expectation |
 | ----- | --------- | ---------------- |
 | **Package signing** | No `rh-sign-npm-packages`; pipeline ships unsigned `.tgz` to Pulp | Add signing task (mirror `rh-sign-python-wheels`); gate on signing secret; optional compliance fields in attestation predicate |
-| **Pulp npm attestations** | No package-bound attestation content type; cannot host DSSE / in-toto next to packages (Python has PEP 740 provenance) | See [story-pulp-npm-package-attestations.md](./story-pulp-npm-package-attestations.md) — pulp_npm stores cosign DSSE with allowlisted predicates (SLSA v1, VSA, …), not PEP 740; then wire upload from release |
+| **Pulp npm attestations** | No package-bound attestation content type; cannot host DSSE / in-toto next to packages (Python has PEP 740 provenance) | See [story-pulp-npm-package-attestations.md](./story-pulp-npm-package-attestations.md) — pulp_npm stores **Sigstore bundles** (DSSE/in-toto inside) with allowlisted predicates (SLSA v1, VSA, …), sha512 PURL subjects, and serves the npm client contract (`dist.attestations` packument pointers, `/-/npm/v1/attestations/{name}@{version}`, `/-/npm/v1/keys`); then wire upload from release. Conformance test: `npm audit signatures` verifies an attested package from Pulp. Consumer procedure: [npm-attestation-verification.md](./npm-attestation-verification.md) |
+| **Signing task output format** | (none — no `rh-sign-npm-packages` yet) | Sign task must emit **Sigstore bundles** (v0.1/v0.2), not bare cosign `.att` envelopes — npm clients consume bundles only; DSSE is inside. Statement subject: `pkg:npm/{name}@{version}` with **both** sha256 and sha512 digests (npm/pacote checks sha512; cosign `verify-blob-attestation` checks sha256) |
 | **Atlas / SBOM upload** | Not wired | Wire when ProdSec requires (same bar as Python when enabled) |
 | **Upload client** | `curl` + Pulp REST in `upload-npm-pulp` | Prefer `pulp-cli` (or shared plumbing-utils) for maintainability, retries, and API drift |
 | **Compliance file sidecars** | Labels (`tl.compliance_level`) applied on the npm content unit; `PULP_FILE_REPOSITORY` optional and usually unset → **no** adjacent `*.tl-compliance.json` in a file repo | Create a Pulp **file** repository for compliance JSON; set `PULP_FILE_REPOSITORY` via RPA / `collect-task-params`; stop relying on labels alone for operators who need the full sidecar |
@@ -73,7 +74,7 @@ PoC spine when these are wired:
 | **verify_ec_task_bundle** | Deprecated/ignored; EC task resolved from pinned ec-cli git revision | Keep documenting as ignored, or switch to the supported Conforma resolver pattern catalog-wide when peers do |
 | **Advisory content** | Pipeline may still call advisory steps with npm-thin content | Flesh advisory / product notes for npm when release process requires them |
 | **RSC pipeline pin** | RPA uses git `revision: development` | After promote, pin to `production`; `taskGitRevision` is injected by release-operator from the same value — no separate SHA enforcement in pipeline YAML |
-| **Attestations at release** | Verify boundary; cosign predicate may omit compliance fields | Full attest per `.tgz`; optional `compliance_level` / `assessed_at` in predicate when sidecars exist |
+| **Attestations at release** | Verify boundary; cosign predicate may omit compliance fields | Full attest per `.tgz` as **Sigstore bundles** with dual sha256+sha512 subjects; optional `compliance_level` / `assessed_at` in predicate when sidecars exist. Bare `.att` DSSE envelopes are a dead end (no npm client consumes them) — see signing-task row above |
 
 ---
 
@@ -107,7 +108,7 @@ PoC spine when these are wired:
 
 | Topic | PoC today | Prod expectation |
 | ----- | --------- | ---------------- |
-| **Post-release smoke** | Manual `npm install --registry …/javascript/` | Automate smoke (and optional digest/idempotency checks) in release or a follow-on job |
+| **Post-release smoke** | Manual `npm install --registry …/javascript/` | Automate smoke (and optional digest/idempotency checks) in release or a follow-on job; add `npm audit signatures` to the smoke once attestations land (see [npm-attestation-verification.md](./npm-attestation-verification.md)) |
 | **Credentials** | Reuse / share Pulp secret pattern with Python wheels | Confirm npm push ACL on the domain; separate secret if least-privilege requires it |
 | **Consumer docs** | Internal plan docs | Public install URL, scoped package rules, L1/L2/L3 meaning, and “no silent npmjs for TL platform optionals” |
 | **Minimum compliance level** | Publish allowed at L1–L3; level fixed at on-push | Org policy: document prod default (often L3 for apps); see proposal compliance section |
